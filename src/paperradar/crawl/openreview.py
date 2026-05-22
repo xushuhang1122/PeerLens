@@ -14,6 +14,9 @@ _HEADERS = {"User-Agent": settings.openreview.user_agent}
 
 def _normalize_decision(venue: str, conference: str) -> DecisionType:
     v = venue.lower()
+    # Empty venue = paper was not accepted (rejected / withdrawn / no final decision)
+    if not v or v.startswith("submitted") or "withdraw" in v:
+        return "rejected"
     if "oral" in v:
         return "oral"
     if "spotlight" in v or "notable" in v:
@@ -23,9 +26,6 @@ def _normalize_decision(venue: str, conference: str) -> DecisionType:
     if "accept" in v:
         return "accepted"
     if "reject" in v:
-        return "rejected"
-    # Papers with no venue string or "submitted to..." are unreviewed / rejected without full decision
-    if not v or v.startswith("submitted") or "withdraw" in v:
         return "rejected"
     return "unknown"
 
@@ -53,8 +53,10 @@ def _extract_paper(note: dict, conference: str, year: int) -> Optional[Paper]:
     if not title:
         return None
 
-    venue = _val("venue") or _val("venueid")
-    decision = _normalize_decision(venue, conference)
+    # Use content.venue (human-readable, e.g. "ICLR 2024 rejected") for decision detection.
+    # Do NOT fall back to venueid — a venueid like "ICLR.cc/2024/Conference" is not a decision string.
+    venue_str = _val("venue")
+    decision = _normalize_decision(venue_str, conference)
 
     return Paper(
         id=note.get("id", ""),
@@ -64,7 +66,7 @@ def _extract_paper(note: dict, conference: str, year: int) -> Optional[Paper]:
         abstract=_val("abstract"),
         keywords=_list_val("keywords"),
         primary_area=_val("primary_area") or _val("area"),
-        venue=venue,
+        venue=venue_str or _val("venueid"),
         decision=decision,
         forum_url=f"https://openreview.net/forum?id={note.get('id', '')}",
         conference=conference,
@@ -93,17 +95,23 @@ class OpenReviewClient:
         self,
         venue_id: str,
         venue_pattern: Optional[str] = None,
+        skip_venue_id: bool = False,
     ) -> Iterator[dict]:
-        """Yield raw note dicts from OpenReview with pagination."""
+        """Yield raw note dicts from OpenReview with pagination.
+
+        skip_venue_id: omit the content.venueid filter, querying by content.venue only.
+        Needed for ICLR rejected papers which may have a different venueid than accepted ones.
+        """
         offset = 0
         while True:
             params: dict = {
-                "content.venueid": venue_id,
                 "details": "replyCount,invitation",
                 "sort": "number:desc",
                 "limit": self._cfg.limit,
                 "offset": offset,
             }
+            if not skip_venue_id:
+                params["content.venueid"] = venue_id
             if venue_pattern:
                 params["content.venue"] = venue_pattern
             data = self._get(params)
@@ -132,16 +140,36 @@ class OpenReviewClient:
         decision_patterns = conf_cfg.get("decisions", {})
 
         if decision and decision in decision_patterns:
-            # Fetch a specific decision type using its known venue-string pattern
             venue_pattern = decision_patterns[decision].format(year=year)
-            notes_iter = self.paginate(venue_id, venue_pattern)
-        else:
-            # Fetch ALL submissions for this venue (accepted + rejected + withdrawn).
-            # Decision is auto-detected from content.venue via _normalize_decision.
-            notes_iter = self.paginate(venue_id)
+            # Rejected papers on ICLR may live under a different venueid — skip the filter
+            skip = (decision == "rejected")
+            notes_iter = self.paginate(venue_id, venue_pattern, skip_venue_id=skip)
+            papers = []
+            for note in notes_iter:
+                p = _extract_paper(note, conference, year)
+                if p:
+                    papers.append(p)
+            return papers
 
+        if decision_patterns:
+            # Fetch each defined decision category separately.
+            # For "rejected" entries, skip the venueid filter so papers with a
+            # different venueid (common for ICLR rejected) are still found.
+            papers: list[Paper] = []
+            for dec, pattern in decision_patterns.items():
+                vp = pattern.format(year=year)
+                skip = (dec == "rejected")
+                for note in self.paginate(venue_id, vp, skip_venue_id=skip):
+                    p = _extract_paper(note, conference, year)
+                    if p:
+                        papers.append(p)
+                time.sleep(self._cfg.single_sleep)
+            return papers
+
+        # No decision patterns defined (ICML, AISTATS, etc.): fetch all by venueid.
+        # Decision is inferred from content.venue via _normalize_decision.
         papers = []
-        for note in notes_iter:
+        for note in self.paginate(venue_id):
             p = _extract_paper(note, conference, year)
             if p:
                 papers.append(p)

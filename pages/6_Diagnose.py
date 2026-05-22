@@ -27,20 +27,19 @@ def _render_simulated_review(rev: SimulatedReview) -> None:
     venue_label = f" — {rev.venue}" if rev.venue else ""
     st.subheader(f"Simulated Peer Review{venue_label}")
     with st.container(border=True):
-        cols = st.columns(5)
-        with cols[0]:
-            _render_score_chip(f"Overall ({rev.overall_scale})", rev.overall_score, int(rev.overall_scale.split("-")[-1]))
-        with cols[1]:
-            _render_score_chip(f"Soundness ({rev.soundness_scale})", rev.soundness, int(rev.soundness_scale.split("-")[-1]))
-        with cols[2]:
-            _render_score_chip(f"Presentation ({rev.presentation_scale})", rev.presentation, int(rev.presentation_scale.split("-")[-1]))
-        with cols[3]:
-            _render_score_chip(f"Contribution ({rev.contribution_scale})", rev.contribution, int(rev.contribution_scale.split("-")[-1]))
-        with cols[4]:
-            _render_score_chip(f"Confidence ({rev.confidence_scale})", rev.confidence, int(rev.confidence_scale.split("-")[-1]))
-
+        st.markdown(f"### {rev.recommendation}")
         if rev.score_interpretation:
-            st.caption(f"Score interpretation: {rev.score_interpretation}")
+            st.caption(rev.score_interpretation)
+
+        cols = st.columns(4)
+        with cols[0]:
+            _render_score_chip(f"Soundness ({rev.soundness_scale})", rev.soundness, int(rev.soundness_scale.split("-")[-1]))
+        with cols[1]:
+            _render_score_chip(f"Presentation ({rev.presentation_scale})", rev.presentation, int(rev.presentation_scale.split("-")[-1]))
+        with cols[2]:
+            _render_score_chip(f"Contribution ({rev.contribution_scale})", rev.contribution, int(rev.contribution_scale.split("-")[-1]))
+        with cols[3]:
+            _render_score_chip(f"Confidence ({rev.confidence_scale})", rev.confidence, int(rev.confidence_scale.split("-")[-1]))
 
         if rev.summary:
             st.markdown(f"**Verdict:** {rev.summary}")

@@ -19,8 +19,9 @@ class DiagnosisSuggestion(BaseModel):
 
 class SimulatedReview(BaseModel):
     venue: str = ""
-    overall_score: int       # scale depends on venue
-    overall_scale: str = "1-10"
+    # Verbal recommendation label, optionally with venue-specific score.
+    # e.g. "Weak Accept", "Reject", "6/10 — marginally above threshold at ICLR"
+    recommendation: str
     confidence: int
     confidence_scale: str = "1-5"
     soundness: int
@@ -29,7 +30,7 @@ class SimulatedReview(BaseModel):
     presentation_scale: str = "1-4"
     contribution: int
     contribution_scale: str = "1-4"
-    score_interpretation: str = ""  # e.g. "5/10 = borderline at NeurIPS"
+    score_interpretation: str = ""
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)

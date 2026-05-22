@@ -127,7 +127,11 @@ def review_analysis_node(state: DiagnosisState) -> dict[str, Any]:
     if paper_ids:
         try:
             reviews = get_paper_reviews.invoke({"paper_ids": paper_ids})
-            updates["retrieved_reviews"] = {"count": len(reviews.results)}
+            excerpts = [r.full_text[:600] for r in reviews.results[:8] if r.full_text]
+            updates["retrieved_reviews"] = {
+                "count": len(reviews.results),
+                "excerpts": excerpts,
+            }
             msgs.append(AIMessage(content=f"Retrieved reviews for {len(reviews.results)} papers"))
         except Exception as e:
             msgs.append(AIMessage(content=f"Review retrieval skipped: {e}"))
@@ -243,20 +247,21 @@ def _get_venue_criteria(target_venue: str) -> str:
 def diagnose_node(state: DiagnosisState) -> dict[str, Any]:
     domain = state.detected_domain
     abstract = state.paper_abstract_clean or state.paper_text[:800]
+    paper_body = state.paper_text[:2000]
     keywords = state.detected_keywords
     target_venue = state.target_venue
 
     accepted_summary = ""
     if state.similar_accepted:
         accepted_summary = "\n".join(
-            f"- {p.title} ({p.conference} {p.year}): {p.abstract[:200]}"
+            f"- {p.title} ({p.conference} {p.year}, {p.decision}): {p.abstract[:300]}"
             for p in state.similar_accepted[:5]
         )
 
     rejected_summary = ""
     if state.similar_rejected:
         rejected_summary = "\n".join(
-            f"- {p.title} ({p.conference} {p.year}): {p.abstract[:200]}"
+            f"- {p.title} ({p.conference} {p.year}, rejected): {p.abstract[:300]}"
             for p in state.similar_rejected[:5]
         )
 
@@ -269,81 +274,95 @@ def diagnose_node(state: DiagnosisState) -> dict[str, Any]:
                 for c in state.review_patterns.clusters[:5]
             )
 
+    review_excerpts = ""
+    if state.retrieved_reviews and state.retrieved_reviews.get("excerpts"):
+        excerpts = state.retrieved_reviews["excerpts"]
+        review_excerpts = "\n---\n".join(excerpts[:5])
+
     venue_criteria = _get_venue_criteria(target_venue)
-    venue_section = ""
-    if venue_criteria:
-        venue_section = f"\n== TARGET VENUE ==\n{venue_criteria}\n"
+    venue_section = f"\n== TARGET VENUE ==\n{venue_criteria}\n" if venue_criteria else ""
 
-    if target_venue:
-        score_instructions = (
-            f"Use the scoring scale appropriate for {target_venue}. "
-            "Adapt overall_scale, confidence_scale, soundness_scale, presentation_scale, contribution_scale "
-            "to match this venue's actual review form. "
-            "Set score_interpretation to explain what the overall_score means at this venue "
-            "(e.g. '5/10 = borderline reject at NeurIPS')."
-        )
-    else:
-        score_instructions = (
-            "Use standard ML conference scoring: overall 1-10 (5=borderline), "
-            "soundness/presentation/contribution 1-4, confidence 1-5."
-        )
+    recommendation_instructions = (
+        f"For {target_venue}, choose the recommendation label that best matches this venue's decision vocabulary. "
+        "If the venue uses numeric scores (e.g. ICLR 1-10), include the number too. "
+        "Examples: '3 — Reject', '5 — Marginally below acceptance threshold', "
+        "'6 — Marginally above acceptance threshold', '8 — Accept', '10 — Strong Accept'. "
+        "For venues like EMNLP/ACL (1-5): '1 — Strong Reject', '3 — Borderline', '5 — Strong Accept'. "
+        "For CVPR/ECCV (1-6): '3 — Weak Reject', '4 — Weak Accept'. "
+        "Base your recommendation strictly on the paper's actual content and weaknesses, not a default middle value."
+    ) if target_venue else (
+        "Choose one of these recommendation labels based on honest assessment of the paper: "
+        "'Strong Reject', 'Reject', 'Weak Reject / Borderline Reject', "
+        "'Weak Accept / Borderline Accept', 'Accept', 'Strong Accept'. "
+        "Do NOT default to borderline — assess the paper on its specific merits."
+    )
 
-    prompt = f"""You are an expert academic reviewer simulating a peer review for an ML/AI paper.
+    prompt = f"""You are an expert academic reviewer simulating a thorough peer review for an ML/AI paper.
 {venue_section}
-Paper domain: {domain}
-Paper keywords: {', '.join(keywords)}
-Paper abstract:
+== PAPER BEING REVIEWED ==
+Domain: {domain}
+Keywords: {', '.join(keywords)}
+
+Abstract:
 {abstract}
 
+Extended content (introduction / methods excerpt):
+{paper_body}
+
+== CONTEXT FROM LOCAL DATABASE ==
 Similar ACCEPTED papers in this area:
-{accepted_summary or "(none found in local database)"}
+{accepted_summary or "(none found)"}
 
 Similar REJECTED papers in this area:
-{rejected_summary or "(none found in local database)"}
+{rejected_summary or "(none found)"}
 
 Reviewer concern clusters in this domain:
 {cluster_summary or "(none found)"}
 
-Produce a detailed diagnosis. Output ONLY this JSON:
+Actual reviewer comments from similar papers (use these to ground your reviewer_comment fields):
+{review_excerpts or "(none available)"}
+
+== INSTRUCTIONS ==
+Produce a detailed, paper-specific diagnosis grounded in the content above.
+Output ONLY valid JSON matching this schema exactly:
 {{
-  "key_reviewer_concerns": ["concern 1", "concern 2", "concern 3"],
-  "acceptance_patterns": ["pattern 1", "pattern 2", "pattern 3"],
-  "rejection_patterns": ["pattern 1", "pattern 2", "pattern 3"],
+  "key_reviewer_concerns": ["specific concern about THIS paper", ...],
+  "acceptance_patterns": ["what makes papers in this area get accepted", ...],
+  "rejection_patterns": ["what makes papers in this area get rejected", ...],
   "suggestions": [
     {{
       "aspect": "novelty",
-      "reviewer_comment": "The paper claims X but does not sufficiently differentiate from prior work Y.",
-      "suggestion": "Add a dedicated comparison section showing concrete improvements over Y in 3 metrics.",
+      "reviewer_comment": "Exact quote or paraphrase of a reviewer concern specific to this paper.",
+      "suggestion": "Concrete, actionable improvement with specific details (what to add/change/fix).",
       "priority": "critical"
     }}
   ],
-  "overall_assessment": "2-3 sentence overall assessment of where this paper stands in the field.",
+  "overall_assessment": "2-3 sentences assessing this specific paper's position in the field.",
   "simulated_review": {{
     "venue": "{target_venue or 'general ML conference'}",
-    "overall_score": 5,
-    "overall_scale": "1-10",
-    "confidence": 3,
+    "recommendation": "<label based on honest assessment — see instructions>",
+    "confidence": <1-5 int>,
     "confidence_scale": "1-5",
-    "soundness": 3,
+    "soundness": <1-4 int>,
     "soundness_scale": "1-4",
-    "presentation": 3,
+    "presentation": <1-4 int>,
     "presentation_scale": "1-4",
-    "contribution": 2,
+    "contribution": <1-4 int>,
     "contribution_scale": "1-4",
-    "score_interpretation": "5/10 = borderline at this venue",
-    "strengths": ["strength 1", "strength 2"],
-    "weaknesses": ["weakness 1", "weakness 2", "weakness 3"],
-    "questions": ["clarification question 1", "clarification question 2"],
-    "summary": "2-3 sentence reviewer verdict."
+    "score_interpretation": "<what the recommendation means at this venue>",
+    "strengths": ["paper-specific strength 1", "paper-specific strength 2"],
+    "weaknesses": ["paper-specific weakness 1", "paper-specific weakness 2", "..."],
+    "questions": ["specific question to authors about this paper", "..."],
+    "summary": "2-3 sentence reviewer verdict specific to this paper."
   }}
 }}
 
 Requirements:
-- Include 4-6 suggestions covering novelty, experiments, clarity, related work, reproducibility, theory.
-- Each suggestion must include a specific reviewer_comment in the style that reviewer would actually write.
-- Priorities: critical = must fix, important = strongly recommended, minor = nice to have.
-- {score_instructions}
-- Make the simulated_review reflect the specific standards and expectations of the target venue.
+- 4-6 suggestions covering novelty, experiments, clarity, related work, reproducibility, and/or theory.
+- Every reviewer_comment and suggestion must reference THIS paper's content specifically — no generic statements.
+- Use actual reviewer language from the excerpts above where relevant.
+- Priorities: critical = must fix before acceptance, important = strongly recommended, minor = nice to have.
+- {recommendation_instructions}
 """
     response = _llm.invoke(prompt)
     content = response.content if isinstance(response.content, str) else str(response.content)
