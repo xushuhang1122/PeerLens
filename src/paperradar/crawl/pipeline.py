@@ -226,3 +226,41 @@ class CrawlPipeline:
         self._index_papers(papers)
         self._index_reviews(papers)
         return len(papers)
+
+    def refetch_reviews(self, conference: str, year: int) -> int:
+        """Re-fetch and re-index reviews for an already-crawled conference/year.
+
+        Reads paper IDs from the saved raw JSON (no re-crawl of papers) and
+        calls the review pipeline with the current (fixed) fetcher logic.
+        Returns the number of papers that received at least one review.
+        """
+        raw_file = Path(settings.raw_data_dir) / f"{conference.lower()}_{year}" / "papers.json"
+        if not raw_file.exists():
+            raise FileNotFoundError(f"Raw data not found: {raw_file}")
+        with open(raw_file, encoding="utf-8") as f:
+            data = json.load(f)
+        papers = [Paper.model_validate(d) for d in data]
+        self._index_reviews(papers)
+        return len(papers)
+
+    def refetch_reviews_async(
+        self,
+        conference: str,
+        year: int,
+        on_complete: Optional[Callable[[int], None]] = None,
+    ) -> None:
+        """Run refetch_reviews in a background thread."""
+        def _run() -> None:
+            try:
+                n = self.refetch_reviews(conference, year)
+                if on_complete:
+                    on_complete(n)
+            except Exception:
+                pass
+
+        thread = threading.Thread(
+            target=_run,
+            daemon=True,
+            name=f"refetch-reviews-{conference}-{year}",
+        )
+        thread.start()

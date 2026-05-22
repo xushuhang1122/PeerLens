@@ -24,7 +24,7 @@ def get_pipeline():
     return CrawlPipeline()
 
 
-st.title("📚 Library")
+st.title("Library")
 
 tab_db, tab_crawl, tab_discover = st.tabs(
     ["Database Stats", "Crawl Conference", "Discover & Add Venue"]
@@ -35,7 +35,7 @@ tab_db, tab_crawl, tab_discover = st.tabs(
 # -----------------------------------------------------------------------
 with tab_db:
     st.subheader("Local Database Overview")
-    if st.button("Refresh", icon="🔄"):
+    if st.button("Refresh"):
         st.cache_data.clear()
 
     try:
@@ -144,6 +144,49 @@ with tab_crawl:
                 )
 
     st.divider()
+    with st.expander("Re-fetch Reviews for an Already-Crawled Conference"):
+        st.caption(
+            "Use this if papers are already in the database but reviewer comments are missing. "
+            "This re-pulls reviews from OpenReview using the current field-mapping logic "
+            "without re-crawling papers."
+        )
+        import os
+        from pathlib import Path
+        from src.paperradar.config import settings as _settings
+
+        raw_root = Path(_settings.raw_data_dir)
+        available_pairs: list[tuple[str, int]] = []
+        if raw_root.exists():
+            for d in sorted(raw_root.iterdir()):
+                if d.is_dir() and (d / "papers.json").exists():
+                    parts = d.name.rsplit("_", 1)
+                    if len(parts) == 2 and parts[1].isdigit():
+                        available_pairs.append((parts[0].upper(), int(parts[1])))
+
+        if not available_pairs:
+            st.info("No locally saved raw data found. Run a crawl first.")
+        else:
+            pair_labels = [f"{c} {y}" for c, y in available_pairs]
+            selected = st.selectbox(
+                "Select conference/year to re-fetch reviews",
+                options=pair_labels,
+                key="refetch_pair",
+            )
+            idx = pair_labels.index(selected)
+            rf_conf, rf_year = available_pairs[idx]
+
+            if st.button("Re-fetch Reviews", key="btn_refetch_reviews"):
+                pipeline = get_pipeline()
+                pipeline.refetch_reviews_async(
+                    conference=rf_conf.lower(),
+                    year=rf_year,
+                )
+                st.success(
+                    f"Re-fetching reviews for **{rf_conf} {rf_year}** in the background. "
+                    "This may take several minutes — check Database Stats when done."
+                )
+
+    st.divider()
     st.subheader("Crawl Log")
     try:
         conn = sqlite3.connect(settings.sqlite.db_path)
@@ -221,7 +264,7 @@ with tab_discover:
                 key="discover_label",
             )
 
-            if st.button("Crawl & Index This Venue", type="primary", icon="⬇️"):
+            if st.button("Crawl & Index This Venue", type="primary"):
                 if not disc_label.strip():
                     st.warning("Enter a label first.")
                 else:

@@ -12,36 +12,92 @@ from ..schemas.paper import Review
 _HEADERS = {"User-Agent": settings.openreview.user_agent}
 _BASE = "https://api2.openreview.net/notes"
 
+# Invitation substrings that indicate non-review notes
+_EXCLUDE_INVITATION = (
+    "rebuttal",
+    "response",
+    "meta_review",
+    "decision",
+    "desk_rejection",
+    "withdraw",
+    "ethics_review",
+    "ac_recommendation",
+    "program_chair",
+    "sac_report",
+    "senior_area_chair",
+    "author_checklist",
+    "camera_ready",
+    "supplementary",
+)
+
+
+def _is_review_invitation(invitation: str) -> bool:
+    inv = invitation.lower()
+    if "review" not in inv:
+        return False
+    return not any(pat in inv for pat in _EXCLUDE_INVITATION)
+
 
 def _extract_review(note: dict, paper_id: str) -> Optional[Review]:
-    invitation = note.get("invitation", "") or ""
-    if "Official_Review" not in invitation:
+    # API v2 uses "invitations" (list); fall back to legacy "invitation" (string)
+    raw_invitations = note.get("invitations") or []
+    if not raw_invitations:
+        legacy = note.get("invitation", "") or ""
+        raw_invitations = [legacy] if legacy else []
+
+    invitation = next(
+        (inv for inv in raw_invitations if _is_review_invitation(inv)),
+        None,
+    )
+    if invitation is None:
         return None
 
     content = note.get("content", {})
 
-    def _val(field: str) -> str:
-        v = content.get(field, {})
-        if isinstance(v, dict):
-            return str(v.get("value", "") or "")
-        return str(v) if v else ""
+    def _val(*fields: str) -> str:
+        for field in fields:
+            v = content.get(field, {})
+            if isinstance(v, dict):
+                s = str(v.get("value", "") or "")
+            else:
+                s = str(v) if v else ""
+            if s:
+                return s
+        return ""
 
-    def _num(field: str) -> Optional[float]:
-        v = content.get(field, {})
-        if isinstance(v, dict):
-            v = v.get("value")
-        try:
-            return float(str(v).split("/")[0].strip()) if v else None
-        except (ValueError, AttributeError):
-            return None
+    def _num(*fields: str) -> Optional[float]:
+        for field in fields:
+            v = content.get(field, {})
+            if isinstance(v, dict):
+                v = v.get("value")
+            try:
+                if v is not None and str(v).strip():
+                    return float(str(v).split("/")[0].strip())
+            except (ValueError, AttributeError):
+                pass
+        return None
 
-    strengths = _val("strengths")
-    weaknesses = _val("weaknesses")
-    questions = _val("questions_and_suggestions") or _val("questions")
-    summary = _val("summary")
-    soundness = _val("soundness")
-    presentation = _val("presentation")
-    contribution = _val("contribution")
+    summary = _val("summary", "summary_of_the_paper", "paper_summary", "overview")
+
+    # Handle venues that combine strengths/weaknesses into one field (e.g. older ICLR)
+    combined_sw = _val("strength_and_weaknesses", "strengths_and_weaknesses")
+    if combined_sw:
+        strengths = combined_sw
+        weaknesses = ""
+    else:
+        strengths = _val("strengths", "strength", "pros", "positive_aspects")
+        weaknesses = _val("weaknesses", "weakness", "limitations", "cons", "negative_aspects")
+
+    questions = _val(
+        "questions",
+        "questions_and_suggestions",
+        "questions_for_the_authors",
+        "additional_comments",
+        "comments",
+    )
+    soundness = _val("soundness", "technical_quality", "correctness", "technical_correctness")
+    presentation = _val("presentation", "clarity", "writing_quality", "clarity_and_writing")
+    contribution = _val("contribution", "originality", "novelty_and_significance", "significance")
 
     parts = [s for s in [summary, strengths, weaknesses, questions] if s]
     full_text = "\n\n".join(parts)
@@ -50,13 +106,17 @@ def _extract_review(note: dict, paper_id: str) -> Optional[Review]:
     if len(full_text) > max_chars:
         full_text = full_text[:max_chars]
 
+    # Skip notes with no usable text at all
+    if not full_text.strip():
+        return None
+
     return Review(
         id=note.get("id", ""),
         forum_id=note.get("forum", ""),
         paper_id=paper_id,
         reviewer_id=note.get("signatures", [""])[0] if note.get("signatures") else "",
-        rating=_num("rating"),
-        confidence=_num("confidence"),
+        rating=_num("rating", "recommendation", "score", "overall"),
+        confidence=_num("confidence", "reviewer_confidence"),
         summary=summary,
         soundness=soundness,
         presentation=presentation,
@@ -72,11 +132,23 @@ def _extract_review(note: dict, paper_id: str) -> Optional[Review]:
 async def _fetch_forum_notes_async(
     session: aiohttp.ClientSession, forum_id: str
 ) -> list[dict]:
-    url = f"{_BASE}?forum={forum_id}"
-    async with session.get(url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-        resp.raise_for_status()
-        data = await resp.json()
-        return data.get("notes", [])
+    # limit=1000 prevents the default pagination cutoff (typically 25 notes)
+    url = f"{_BASE}?forum={forum_id}&limit=1000"
+    for attempt in range(4):
+        try:
+            async with session.get(url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                if resp.status == 429:
+                    wait = 2 ** attempt * 5  # 5s, 10s, 20s, 40s
+                    await asyncio.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                data = await resp.json()
+                return data.get("notes", [])
+        except aiohttp.ClientResponseError:
+            if attempt == 3:
+                raise
+            await asyncio.sleep(2 ** attempt * 2)
+    return []
 
 
 async def _fetch_reviews_batch(
@@ -97,7 +169,8 @@ async def _fetch_reviews_batch(
                         reviews.append(r)
                 results[paper_id] = reviews
                 await asyncio.sleep(settings.openreview.single_sleep)
-            except Exception:
+            except Exception as exc:
+                print(f"[reviews] fetch failed for {paper_id}: {exc}")
                 results[paper_id] = []
 
     connector = aiohttp.TCPConnector(limit=concurrency)

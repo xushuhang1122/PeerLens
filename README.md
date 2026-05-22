@@ -188,12 +188,11 @@ All paper and review data is fetched from [OpenReview](https://openreview.net) v
 
 ## TODO
 
-- [ ] **BibTeX / CSV export** — export selected search results or survey papers to `.bib` or `.csv`.
-- [ ] **Incremental crawl** — detect newly added papers in an already-crawled venue/year and index only the delta.
-- [ ] **Review score parsing** — extract numeric ratings and confidence scores from review text and expose them as filter/sort dimensions.
+
 - [ ] **Multi-user support** — isolate episodic memory and preference vectors per user identity for lab sharing.
 - [ ] **Scheduled push notifications** — run the push engine on a cron schedule and deliver alerts via email or Slack webhook.
 - [ ] **More agents** — e.g. a Writing Agent (improve your paper section by section against reviewer patterns), a Trend Agent (weekly digest of new papers matching your interests).
+- [ ] **Conference-specific schema alignment** — normalize review forms, score scales (1–10 vs. 1–4), confidence ratings, and ethics checkboxes across venues (NeurIPS/ICML/ICLR/COLM/etc.) instead of hard-coding OpenReview defaults.
 
 ---
 
