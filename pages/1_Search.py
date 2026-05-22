@@ -39,22 +39,25 @@ def decision_badge(decision: str) -> str:
 
 st.title("🔍 Search Papers")
 
-# --- Sidebar filters ---
-with st.sidebar:
-    st.header("Filters")
-    all_conferences = list(settings.conferences.CONFERENCES.keys())
-    conf_filter = st.multiselect("Conference", all_conferences)
-    year_filter = st.multiselect("Year", list(range(2025, 2021, -1)))
-    decision_filter = st.multiselect(
-        "Decision", ["oral", "spotlight", "poster", "accepted", "rejected"]
-    )
-    top_k = st.slider("Max results", 5, 100, 20, step=5)
-
-# --- Search bar ---
 query = st.text_input(
     "Search query",
     placeholder="e.g. efficient attention mechanisms for long sequences",
 )
+
+with st.expander("Filters", expanded=False):
+    all_conferences = list(settings.conferences.CONFERENCES.keys())
+    col1, col2, col3, col4 = st.columns([3, 2, 3, 1])
+    with col1:
+        conf_filter = st.multiselect("Conference", all_conferences)
+    with col2:
+        year_filter = st.multiselect("Year", list(range(2025, 2021, -1)))
+    with col3:
+        decision_filter = st.multiselect(
+            "Decision", ["oral", "spotlight", "poster", "accepted", "rejected"]
+        )
+    with col4:
+        top_k = st.number_input("Top K", min_value=5, max_value=200, value=20, step=5)
+
 search_btn = st.button("Search", type="primary", use_container_width=True)
 
 if search_btn and query.strip():

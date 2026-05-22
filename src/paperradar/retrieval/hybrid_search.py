@@ -75,7 +75,9 @@ class HybridSearcher:
             scored.append((pid, score))
 
         scored.sort(key=lambda x: x[1], reverse=True)
-        top_ids = [pid for pid, _ in scored[:top_k]]
+        # Fetch a larger pool so post-filtering still yields top_k results
+        pool_size = min(top_k * 4, len(scored))
+        top_ids = [pid for pid, _ in scored[:pool_size]]
         score_map = {pid: s for pid, s in scored}
 
         # --- Hydrate results ---
@@ -116,4 +118,13 @@ class HybridSearcher:
                 )
             )
 
+        # BM25 has no filter awareness — enforce all active filters in Python
+        if inp.decision_filter:
+            results = [r for r in results if r.decision in inp.decision_filter]
+        if inp.conference_filter:
+            results = [r for r in results if r.conference in inp.conference_filter]
+        if inp.year_filter:
+            results = [r for r in results if r.year in inp.year_filter]
+
+        results = results[:top_k]
         return SearchPapersOutput(results=results, total_found=len(results), query=inp.query)

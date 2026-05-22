@@ -24,6 +24,9 @@ def _normalize_decision(venue: str, conference: str) -> DecisionType:
         return "accepted"
     if "reject" in v:
         return "rejected"
+    # Papers with no venue string or "submitted to..." are unreviewed / rejected without full decision
+    if not v or v.startswith("submitted") or "withdraw" in v:
+        return "rejected"
     return "unknown"
 
 
@@ -129,20 +132,12 @@ class OpenReviewClient:
         decision_patterns = conf_cfg.get("decisions", {})
 
         if decision and decision in decision_patterns:
+            # Fetch a specific decision type using its known venue-string pattern
             venue_pattern = decision_patterns[decision].format(year=year)
             notes_iter = self.paginate(venue_id, venue_pattern)
-        elif decision_patterns:
-            # fetch all decisions separately and merge
-            papers: list[Paper] = []
-            for dec, pattern in decision_patterns.items():
-                vp = pattern.format(year=year)
-                for note in self.paginate(venue_id, vp):
-                    p = _extract_paper(note, conference, year)
-                    if p:
-                        papers.append(p)
-                time.sleep(self._cfg.single_sleep)
-            return papers
         else:
+            # Fetch ALL submissions for this venue (accepted + rejected + withdrawn).
+            # Decision is auto-detected from content.venue via _normalize_decision.
             notes_iter = self.paginate(venue_id)
 
         papers = []

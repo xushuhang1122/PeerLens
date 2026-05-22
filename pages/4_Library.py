@@ -10,7 +10,7 @@ sys.path.insert(0, ".")
 
 from src.paperradar.config import settings
 from src.paperradar.crawl.discover import discover_venue
-from src.paperradar.crawl.pipeline import CrawlPipeline, is_crawl_running
+from src.paperradar.crawl.pipeline import CrawlPipeline, is_crawl_running, get_crawl_progress
 from src.paperradar.store.chroma import ChromaManager
 
 
@@ -24,7 +24,77 @@ def get_pipeline():
     return CrawlPipeline()
 
 
+_PHASE_LABELS = {
+    "fetching":  "Fetching papers from OpenReview...",
+    "embedding": "Embedding papers...",
+    "reviews":   "Fetching and indexing reviews...",
+    "done":      "Complete",
+    "failed":    "Failed",
+}
+
+
+@st.fragment(run_every=2)
+def _crawl_progress_panel() -> None:
+    tracking: list[dict] = st.session_state.get("tracking_crawls", [])
+    if not tracking:
+        return
+
+    items_with_prog = [(t, get_crawl_progress(t["key"])) for t in tracking]
+    items_with_prog = [(t, p) for t, p in items_with_prog if p is not None]
+    if not items_with_prog:
+        return
+
+    st.subheader("Crawl Progress")
+    all_finished = True
+    for item, prog in items_with_prog:
+        phase = prog["phase"]
+        step = prog["step"]
+        total = prog["total"]
+        count = prog["paper_count"]
+        pct = step / total
+
+        if phase == "embedding" and count:
+            label = f"Embedding {count:,} papers..."
+        elif phase == "reviews" and count:
+            label = f"Fetching reviews for {count:,} papers..."
+        elif phase == "done" and count:
+            label = f"Complete — {count:,} papers indexed"
+        elif phase == "done":
+            label = "Complete — no papers found"
+        elif phase == "failed":
+            label = f"Failed: {prog.get('error', 'unknown error')}"
+        else:
+            label = _PHASE_LABELS.get(phase, phase)
+
+        if phase == "failed":
+            st.error(f"**{item['label']}** — {label}")
+        else:
+            st.progress(pct, text=f"**{item['label']}** — {label}")
+
+        if phase not in ("done", "failed"):
+            all_finished = False
+
+    if all_finished:
+        col_msg, col_btn = st.columns([6, 1])
+        with col_msg:
+            st.caption("All crawl jobs finished. Refresh Database Stats to see updated counts.")
+        with col_btn:
+            if st.button("Dismiss", key="dismiss_crawl_progress"):
+                st.session_state["tracking_crawls"] = []
+                st.rerun()
+
+    st.divider()
+
+
+def _track(key: str, label: str) -> None:
+    tracking: list[dict] = st.session_state.setdefault("tracking_crawls", [])
+    if not any(t["key"] == key for t in tracking):
+        tracking.append({"key": key, "label": label})
+
+
 st.title("Library")
+
+_crawl_progress_panel()
 
 tab_db, tab_crawl, tab_discover = st.tabs(
     ["Database Stats", "Crawl Conference", "Discover & Add Venue"]
@@ -96,6 +166,14 @@ with tab_crawl:
             )
         force = st.checkbox("Force re-crawl if already exists")
 
+        if decision != "All":
+            st.warning(
+                "Filtering by decision excludes rejected papers. "
+                "The Diagnosis Agent uses rejected samples to identify common reviewer concerns — "
+                "for best results, keep **All** selected.",
+                icon=":material/warning:",
+            )
+
         if st.button("Start Crawl", type="primary", key="crawl_preset"):
             pipeline = get_pipeline()
             if not force and pipeline.check_local(conf, year):
@@ -105,10 +183,12 @@ with tab_crawl:
             else:
                 dec_arg = None if decision == "All" else decision
                 pipeline.run_async(conf, year, decision=dec_arg)
+                crawl_key = f"{conf}_{year}"
+                _track(crawl_key, f"{conf} {year}")
                 st.success(
                     f"Crawl started for **{conf} {year}**"
                     + (f" ({dec_arg})" if dec_arg else "")
-                    + ". Check stats in a few minutes."
+                    + ". Progress shown above."
                 )
 
     else:  # Custom venue_id
@@ -134,13 +214,15 @@ with tab_crawl:
                 st.warning("Enter a label for this venue.")
             else:
                 pipeline = get_pipeline()
-                get_pipeline().run_async_custom(
+                pipeline.run_async_custom(
                     venue_id=custom_venue.strip(),
                     label=custom_label.strip(),
                 )
+                crawl_key = f"custom_{custom_venue.strip()}"
+                _track(crawl_key, custom_label.strip())
                 st.success(
                     f"Background crawl started for `{custom_venue}` "
-                    f"(label: **{custom_label}**). Check stats in a few minutes."
+                    f"(label: **{custom_label}**). Progress shown above."
                 )
 
     st.divider()
@@ -181,9 +263,11 @@ with tab_crawl:
                     conference=rf_conf.lower(),
                     year=rf_year,
                 )
+                crawl_key = f"refetch_{rf_conf.lower()}_{rf_year}"
+                _track(crawl_key, f"{rf_conf} {rf_year} (reviews)")
                 st.success(
                     f"Re-fetching reviews for **{rf_conf} {rf_year}** in the background. "
-                    "This may take several minutes — check Database Stats when done."
+                    "Progress shown above."
                 )
 
     st.divider()
@@ -268,12 +352,15 @@ with tab_discover:
                 if not disc_label.strip():
                     st.warning("Enter a label first.")
                 else:
+                    venue_id = st.session_state["discover_venue_id"]
                     get_pipeline().run_async_custom(
-                        venue_id=st.session_state["discover_venue_id"],
+                        venue_id=venue_id,
                         label=disc_label.strip(),
                     )
+                    crawl_key = f"custom_{venue_id}"
+                    _track(crawl_key, disc_label.strip())
                     st.success(
-                        f"Background crawl started for `{st.session_state['discover_venue_id']}` "
+                        f"Background crawl started for `{venue_id}` "
                         f"(label: **{disc_label}**). "
-                        "Check **Database Stats** in a few minutes."
+                        "Check the progress bar above."
                     )

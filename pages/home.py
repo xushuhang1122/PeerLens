@@ -20,7 +20,7 @@ def get_pipeline():
 
 
 def _show_onboarding():
-    st.title("Welcome to PaperRadar")
+    st.title("Welcome to PeerLens")
     st.markdown(
         "Your local database is empty. "
         "Select the conferences and years you want to index first, then click **Start Setup**. "
@@ -53,6 +53,12 @@ def _show_onboarding():
             f"{total} crawl job(s) selected — "
             f"{', '.join(selected_confs)} x {', '.join(str(y) for y in sorted(selected_years, reverse=True))}"
         )
+    st.info(
+        "All submissions are indexed by default, including rejected papers. "
+        "Rejected samples are used by the Diagnosis Agent to identify common reviewer concerns — "
+        "removing them will reduce diagnostic accuracy.",
+        icon=":material/info:",
+    )
 
     col_btn, col_skip = st.columns([2, 8])
     with col_btn:
@@ -83,8 +89,8 @@ def _show_onboarding():
 
 
 def _show_home():
-    st.title("PaperRadar")
-    st.caption("ML/AI paper research agent — search, analyze, discover")
+    st.title("PeerLens")
+    st.caption("Peer review-powered ML research assistant")
 
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:

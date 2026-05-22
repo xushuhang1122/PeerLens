@@ -57,6 +57,84 @@ def _render_simulated_review(rev: SimulatedReview) -> None:
                 st.markdown(f"- {q}")
 
 
+def _render_report(report) -> None:
+    st.subheader(f"Diagnosis Report — {report.detected_domain}")
+
+    if report.detected_keywords:
+        st.markdown("**Keywords detected:** " + " | ".join(f"`{k}`" for k in report.detected_keywords))
+
+    st.markdown(f"**Overall assessment:** {report.overall_assessment}")
+
+    if report.simulated_review:
+        st.divider()
+        _render_simulated_review(report.simulated_review)
+
+    st.divider()
+    col_acc, col_rej = st.columns(2)
+    with col_acc:
+        st.markdown("**Acceptance patterns in this area**")
+        for p in report.acceptance_patterns:
+            st.markdown(f"- {p}")
+    with col_rej:
+        st.markdown("**Common rejection patterns**")
+        for p in report.rejection_patterns:
+            st.markdown(f"- {p}")
+
+    if report.key_reviewer_concerns:
+        st.markdown("**Key reviewer concerns in this domain**")
+        for c in report.key_reviewer_concerns:
+            st.markdown(f"- {c}")
+
+    st.divider()
+    st.subheader("Improvement Suggestions")
+
+    priority_order = {"critical": 0, "important": 1, "minor": 2}
+    sorted_suggestions = sorted(
+        report.suggestions,
+        key=lambda s: priority_order.get(s.priority.lower(), 3),
+    )
+    for s in sorted_suggestions:
+        color = _PRIORITY_COLOR.get(s.priority.lower(), "gray")
+        with st.container(border=True):
+            st.markdown(f"**:{color}[{s.priority.upper()}]** — **{s.aspect.title()}**")
+            if s.reviewer_comment:
+                st.markdown(f"*Reviewer comment:* _{s.reviewer_comment}_")
+            st.markdown(f"*Suggestion:* {s.suggestion}")
+
+    st.divider()
+    tab_acc, tab_rej = st.tabs([
+        f"Similar Accepted Papers ({len(report.similar_accepted)})",
+        f"Similar Rejected Papers ({len(report.similar_rejected)})",
+    ])
+    with tab_acc:
+        if report.similar_accepted:
+            for p in report.similar_accepted:
+                st.markdown(
+                    f"**[{p.title}]({p.forum_url})** — {p.conference} {p.year} `{p.decision}`"
+                    if p.forum_url else
+                    f"**{p.title}** — {p.conference} {p.year} `{p.decision}`"
+                )
+                if p.abstract:
+                    st.caption(p.abstract[:250] + "..." if len(p.abstract) > 250 else p.abstract)
+        else:
+            st.info("No accepted papers found. Make sure the database has papers crawled for this domain.")
+    with tab_rej:
+        if report.similar_rejected:
+            for p in report.similar_rejected:
+                st.markdown(
+                    f"**[{p.title}]({p.forum_url})** — {p.conference} {p.year} `{p.decision}`"
+                    if p.forum_url else
+                    f"**{p.title}** — {p.conference} {p.year} `{p.decision}`"
+                )
+                if p.abstract:
+                    st.caption(p.abstract[:250] + "..." if len(p.abstract) > 250 else p.abstract)
+        else:
+            st.info("No rejected papers found in the database for this domain.")
+
+
+# ------------------------------------------------------------------
+# Page header
+# ------------------------------------------------------------------
 st.title("Paper Diagnosis")
 st.caption(
     "Upload your paper (PDF). The agent will detect its domain, find similar accepted and rejected papers "
@@ -64,168 +142,99 @@ st.caption(
 )
 
 # ------------------------------------------------------------------
-# Upload
+# If a report already exists, show it and offer to start over
 # ------------------------------------------------------------------
-uploaded = st.file_uploader("Upload paper (PDF)", type=["pdf"])
+existing_report = st.session_state.get("diagnosis_report")
 
-if uploaded is not None:
-    pdf_bytes = uploaded.read()
-    with st.spinner("Extracting text..."):
-        paper_text = extract_paper_text(pdf_bytes, max_words=1500)
-        meta = extract_title_abstract(paper_text)
-
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown(f"**Detected title:** {meta['title']}")
-    with col2:
-        st.caption(f"{len(paper_text.split())} words extracted")
-
-    with st.expander("Abstract preview"):
-        st.write(meta["abstract"] or paper_text[:500])
+if existing_report:
+    meta = st.session_state.get("diagnosis_meta", {})
+    col_info, col_btn = st.columns([5, 1])
+    with col_info:
+        if meta.get("title"):
+            st.markdown(f"**Paper:** {meta['title']}")
+    with col_btn:
+        if st.button("New Diagnosis", type="secondary"):
+            for k in ("diagnosis_report", "diagnosis_meta", "diagnosis_running"):
+                st.session_state.pop(k, None)
+            st.rerun()
 
     st.divider()
-
-    target_venue = st.selectbox(
-        "Target venue (optional)",
-        options=[""] + _KNOWN_VENUES,
-        format_func=lambda x: "Not specified (general review)" if x == "" else x,
-        help="Select or type a venue to get scoring and feedback tailored to that conference or journal's review criteria.",
-    )
-    custom_venue = st.text_input(
-        "Or enter a custom venue",
-        placeholder="e.g. COLM 2026, TMLR, CoRL 2026",
-    )
-    effective_venue = custom_venue.strip() if custom_venue.strip() else target_venue
-
-    if "diagnosis_report" not in st.session_state:
-        st.session_state.diagnosis_report = None
-    if "diagnosis_running" not in st.session_state:
-        st.session_state.diagnosis_running = False
-
-    if st.button("Run Diagnosis", type="primary", disabled=st.session_state.diagnosis_running):
-        st.session_state.diagnosis_running = True
-        st.session_state.diagnosis_report = None
-
-        with st.status("Running diagnosis...", expanded=True) as status:
-            try:
-                final_report = None
-                detected_domain = ""
-
-                for event in stream_diagnosis_agent(paper_text, effective_venue):
-                    if isinstance(event, dict) and "error" in event:
-                        st.warning(f"Agent stopped: {event['error']}")
-                        break
-
-                    if not isinstance(event, dict):
-                        continue
-
-                    msgs = event.get("messages", [])
-                    if msgs:
-                        last = msgs[-1]
-                        role = getattr(last, "type", "")
-                        content = getattr(last, "content", "")
-                        if role == "ai" and content and isinstance(content, str) and content.strip():
-                            st.write(content)
-
-                    domain = event.get("detected_domain", "")
-                    if domain and not detected_domain:
-                        detected_domain = domain
-
-                    report = event.get("report")
-                    if report:
-                        final_report = report
-
-                status.update(label="Done", state="complete")
-                st.session_state.diagnosis_report = final_report
-            except Exception as e:
-                status.update(label="Error", state="error")
-                st.error(str(e))
-
-        st.session_state.diagnosis_running = False
-        st.rerun()
-
-    # ------------------------------------------------------------------
-    # Show report
-    # ------------------------------------------------------------------
-    report = st.session_state.get("diagnosis_report")
-    if report:
-        st.divider()
-        st.subheader(f"Diagnosis Report — {report.detected_domain}")
-
-        if report.detected_keywords:
-            st.markdown("**Keywords detected:** " + " | ".join(f"`{k}`" for k in report.detected_keywords))
-
-        st.markdown(f"**Overall assessment:** {report.overall_assessment}")
-
-        # Simulated review
-        if report.simulated_review:
-            st.divider()
-            _render_simulated_review(report.simulated_review)
-
-        # Acceptance / rejection patterns
-        st.divider()
-        col_acc, col_rej = st.columns(2)
-        with col_acc:
-            st.markdown("**Acceptance patterns in this area**")
-            for p in report.acceptance_patterns:
-                st.markdown(f"- {p}")
-        with col_rej:
-            st.markdown("**Common rejection patterns**")
-            for p in report.rejection_patterns:
-                st.markdown(f"- {p}")
-
-        if report.key_reviewer_concerns:
-            st.markdown("**Key reviewer concerns in this domain**")
-            for c in report.key_reviewer_concerns:
-                st.markdown(f"- {c}")
-
-        # Improvement suggestions
-        st.divider()
-        st.subheader("Improvement Suggestions")
-
-        priority_order = {"critical": 0, "important": 1, "minor": 2}
-        sorted_suggestions = sorted(
-            report.suggestions,
-            key=lambda s: priority_order.get(s.priority.lower(), 3),
-        )
-        for s in sorted_suggestions:
-            color = _PRIORITY_COLOR.get(s.priority.lower(), "gray")
-            with st.container(border=True):
-                st.markdown(f"**:{color}[{s.priority.upper()}]** — **{s.aspect.title()}**")
-                if s.reviewer_comment:
-                    st.markdown(f"*Reviewer comment:* _{s.reviewer_comment}_")
-                st.markdown(f"*Suggestion:* {s.suggestion}")
-
-        # Similar papers
-        st.divider()
-        tab_acc, tab_rej = st.tabs([
-            f"Similar Accepted Papers ({len(report.similar_accepted)})",
-            f"Similar Rejected Papers ({len(report.similar_rejected)})",
-        ])
-        with tab_acc:
-            if report.similar_accepted:
-                for p in report.similar_accepted:
-                    st.markdown(
-                        f"**[{p.title}]({p.forum_url})** — {p.conference} {p.year} `{p.decision}`"
-                        if p.forum_url else
-                        f"**{p.title}** — {p.conference} {p.year} `{p.decision}`"
-                    )
-                    if p.abstract:
-                        st.caption(p.abstract[:250] + "..." if len(p.abstract) > 250 else p.abstract)
-            else:
-                st.info("No accepted papers found. Make sure the database has papers crawled for this domain.")
-        with tab_rej:
-            if report.similar_rejected:
-                for p in report.similar_rejected:
-                    st.markdown(
-                        f"**[{p.title}]({p.forum_url})** — {p.conference} {p.year} `{p.decision}`"
-                        if p.forum_url else
-                        f"**{p.title}** — {p.conference} {p.year} `{p.decision}`"
-                    )
-                    if p.abstract:
-                        st.caption(p.abstract[:250] + "..." if len(p.abstract) > 250 else p.abstract)
-            else:
-                st.info("No rejected papers found in the database for this domain.")
+    _render_report(existing_report)
 
 else:
-    st.info("Upload a PDF above to start the diagnosis.")
+    # ------------------------------------------------------------------
+    # Upload form
+    # ------------------------------------------------------------------
+    uploaded = st.file_uploader("Upload paper (PDF)", type=["pdf"])
+
+    if uploaded is not None:
+        pdf_bytes = uploaded.read()
+        with st.spinner("Extracting text..."):
+            paper_text = extract_paper_text(pdf_bytes, max_words=1500)
+            meta = extract_title_abstract(paper_text)
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown(f"**Detected title:** {meta['title']}")
+        with col2:
+            st.caption(f"{len(paper_text.split())} words extracted")
+
+        with st.expander("Abstract preview"):
+            st.write(meta["abstract"] or paper_text[:500])
+
+        st.divider()
+
+        target_venue = st.selectbox(
+            "Target venue (optional)",
+            options=[""] + _KNOWN_VENUES,
+            format_func=lambda x: "Not specified (general review)" if x == "" else x,
+            help="Select or type a venue to get scoring and feedback tailored to that conference or journal's review criteria.",
+        )
+        custom_venue = st.text_input(
+            "Or enter a custom venue",
+            placeholder="e.g. COLM 2026, TMLR, CoRL 2026",
+        )
+        effective_venue = custom_venue.strip() if custom_venue.strip() else target_venue
+
+        if "diagnosis_running" not in st.session_state:
+            st.session_state.diagnosis_running = False
+
+        if st.button("Run Diagnosis", type="primary", disabled=st.session_state.diagnosis_running):
+            st.session_state.diagnosis_running = True
+            st.session_state["diagnosis_meta"] = meta
+
+            with st.status("Running diagnosis...", expanded=True) as status:
+                try:
+                    final_report = None
+
+                    for event in stream_diagnosis_agent(paper_text, effective_venue):
+                        if isinstance(event, dict) and "error" in event:
+                            st.warning(f"Agent stopped: {event['error']}")
+                            break
+
+                        if not isinstance(event, dict):
+                            continue
+
+                        msgs = event.get("messages", [])
+                        if msgs:
+                            last = msgs[-1]
+                            role = getattr(last, "type", "")
+                            content = getattr(last, "content", "")
+                            if role == "ai" and content and isinstance(content, str) and content.strip():
+                                st.write(content)
+
+                        report = event.get("report")
+                        if report:
+                            final_report = report
+
+                    status.update(label="Done", state="complete")
+                    st.session_state.diagnosis_report = final_report
+                except Exception as e:
+                    status.update(label="Error", state="error")
+                    st.error(str(e))
+
+            st.session_state.diagnosis_running = False
+            st.rerun()
+
+    else:
+        st.info("Upload a PDF above to start the diagnosis.")

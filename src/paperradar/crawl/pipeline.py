@@ -19,6 +19,7 @@ from .reviews import ReviewFetcher
 
 _running_crawls: dict[str, bool] = {}
 _crawl_lock = threading.Lock()
+_crawl_progress: dict[str, dict] = {}
 
 
 def _crawl_key(conference: str, year: int) -> str:
@@ -27,6 +28,10 @@ def _crawl_key(conference: str, year: int) -> str:
 
 def is_crawl_running(conference: str, year: int) -> bool:
     return _running_crawls.get(_crawl_key(conference, year), False)
+
+
+def get_crawl_progress(key: str) -> dict | None:
+    return _crawl_progress.get(key)
 
 
 class CrawlPipeline:
@@ -57,20 +62,28 @@ class CrawlPipeline:
             _running_crawls[key] = True
 
         try:
+            _crawl_progress[key] = {"phase": "fetching", "step": 1, "total": 4, "paper_count": 0}
             papers = self._client.fetch_papers(conference, year, decision)
             if not papers:
+                _crawl_progress[key] = {"phase": "done", "step": 4, "total": 4, "paper_count": 0}
                 self._store.log_crawl(conference, year, decision, 0, "success")
                 return 0
 
+            _crawl_progress[key] = {"phase": "embedding", "step": 2, "total": 4, "paper_count": len(papers)}
             self._save_raw(papers, conference, year)
             self._index_papers(papers)
+
+            _crawl_progress[key] = {"phase": "reviews", "step": 3, "total": 4, "paper_count": len(papers)}
             self._index_reviews(papers)
+
+            _crawl_progress[key] = {"phase": "done", "step": 4, "total": 4, "paper_count": len(papers)}
             self._store.log_crawl(conference, year, decision, len(papers), "success")
 
             if on_complete:
                 on_complete(len(papers))
             return len(papers)
         except Exception as e:
+            _crawl_progress[key] = {"phase": "failed", "step": 0, "total": 4, "paper_count": 0, "error": str(e)}
             self._store.log_crawl(conference, year, decision, 0, "failed")
             raise
         finally:
@@ -174,11 +187,11 @@ class CrawlPipeline:
             _running_crawls[key] = True
 
         try:
+            _crawl_progress[key] = {"phase": "fetching", "step": 1, "total": 4, "paper_count": 0}
             papers = list(self._client.paginate(venue_id))
             from .openreview import _extract_paper
             parsed = []
             for note in papers:
-                # Derive conference/year from venue_id string if possible
                 parts = venue_id.split("/")
                 conf = parts[0].split(".")[-1] if parts else label
                 year_str = next((p for p in parts if p.isdigit() and len(p) == 4), "0")
@@ -188,11 +201,17 @@ class CrawlPipeline:
                     parsed.append(p)
 
             if not parsed:
+                _crawl_progress[key] = {"phase": "done", "step": 4, "total": 4, "paper_count": 0}
                 return 0
 
+            _crawl_progress[key] = {"phase": "embedding", "step": 2, "total": 4, "paper_count": len(parsed)}
             self._save_raw(parsed, label.replace(" ", "_"), 0)
             self._index_papers(parsed)
+
+            _crawl_progress[key] = {"phase": "reviews", "step": 3, "total": 4, "paper_count": len(parsed)}
             self._index_reviews(parsed)
+
+            _crawl_progress[key] = {"phase": "done", "step": 4, "total": 4, "paper_count": len(parsed)}
 
             if on_complete:
                 on_complete(len(parsed))
@@ -240,7 +259,10 @@ class CrawlPipeline:
         with open(raw_file, encoding="utf-8") as f:
             data = json.load(f)
         papers = [Paper.model_validate(d) for d in data]
+        key = f"refetch_{conference.lower()}_{year}"
+        _crawl_progress[key] = {"phase": "reviews", "step": 1, "total": 2, "paper_count": len(papers)}
         self._index_reviews(papers)
+        _crawl_progress[key] = {"phase": "done", "step": 2, "total": 2, "paper_count": len(papers)}
         return len(papers)
 
     def refetch_reviews_async(
