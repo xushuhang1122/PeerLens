@@ -1,60 +1,32 @@
-# PaperRadar
+# 🔬 PeerLens
 
-A local research assistant for ML/AI academic papers on OpenReview. Combines hybrid search, review signal analysis, a multi-turn Research Agent that generates literature surveys, and a Diagnosis Agent that simulates peer review for your own paper — all in a Streamlit interface.
-
-## Changelog
-
-**2026-05-22**
-- **Diagnosis Agent** — upload your PDF, select a target venue (NeurIPS, ICML, ICLR, JMLR, …), and get a simulated peer review with venue-specific scoring scales, strengths/weaknesses/questions, and prioritized improvement suggestions with matched reviewer comments
-- **Research Agent** — redesigned with multi-turn intent clarification (one focused question per turn, sensible defaults), force-extract refined query on early start, and full survey persistence across page reruns
-- **Grouped navigation** — sidebar reorganized with an "Agents" section (Research Agent, Diagnose Paper) and a "Tools" section; adding future agents requires one line in `app.py`
-- **Onboarding wizard** — first-run experience detects empty database and offers a one-click crawl setup for the top conferences + last 3 years
-- **Removed gap analysis from survey** — the research agent no longer runs `identify_research_gaps`; it now reports temporal trends only, which are more relevant for a literature survey
-- **Diagnosis search fix** — removed decision filter from similarity search; papers are now split accepted/rejected in Python after retrieval to maximize recall
-- **Survey no longer disappears** — survey object persisted in session state and re-rendered after `st.rerun()`
-- **Decision field fix** — papers now correctly show `oral/spotlight/poster/accepted/rejected` (previously all showed `unknown` due to wrong OpenReview field priority)
-- **Performance** — ChromaDB and BM25 index use process-level singletons; agent tools initialize lazily to avoid blocking startup
-
-**2026-05-xx** *(initial release)*
-- Hybrid BM25 + dual-vector search with RRF fusion
-- OpenReview crawler for NeurIPS, ICML, ICLR, AISTATS, UAI, CoRL, COLM, RLC
-- Temporal trend analysis, K-Means review clustering, research gap detection
-- Episodic + semantic long-term memory, personalized push recommendations
+> A local AI research assistant powered by real peer review data from OpenReview.
+> Search ML papers by reviewer signal, generate literature surveys, and get venue-calibrated diagnosis for your own paper.
 
 ---
 
-## Features
+## ✨ Features
 
-### Agents
-- **Research Agent** — describe a research topic in natural language. The agent asks one focused question to clarify time range and venue, confirms its understanding, then searches the local paper database and writes a structured mini survey: background, thematic sections with in-text citations, a list of key papers with abstracts, open research questions, and submission advice.
-- **Diagnosis Agent** — upload your paper as a PDF and optionally specify your target venue. The agent extracts your domain and keywords, finds similar accepted and rejected papers, analyzes reviewer concern patterns, and produces: a simulated peer review (overall score, soundness/presentation/contribution, strengths/weaknesses/questions to authors) calibrated to the target venue's actual review criteria, plus prioritized improvement suggestions each paired with an example reviewer comment.
-
-### Search & Retrieval
-- **Hybrid Search** — BM25 keyword matching + dual-vector semantic search (paper content and reviewer comments), fused via Reciprocal Rank Fusion. Filter by decision (oral/spotlight/poster/accepted/rejected), conference, and year.
-- **Review Signal Index** — reviewer comments are embedded separately from abstracts, enabling queries like "papers reviewers found poorly motivated" to surface meaningfully different results.
-
-### Analysis
-- **Temporal Trend Analysis** — track how a research topic's presence evolves across conferences and years.
-- **K-Means Review Clustering** — identify high-frequency criticism patterns in a research area from reviewer text.
-- **Research Gap Detection** — find under-explored topic clusters from paper embeddings.
-
-### Memory & Personalization
-- **Long-term User Memory** — episodic layer (SQLite) records query history and paper feedback; semantic layer (ChromaDB) builds a preference vector from liked papers.
-- **Push Recommendations** — surface newly crawled papers that match your research interests.
+| | |
+|---|---|
+| 🔍 **Hybrid Search** | BM25 + dual-vector semantic search across paper content *and* reviewer comments, fused via RRF. Filter by decision, conference, and year. |
+| 📝 **Research Agent** | Describe a topic in natural language → structured literature survey with citations, temporal trends, and submission advice. |
+| 🩺 **Diagnosis Agent** | Upload your PDF → simulated peer review (overall + soundness/presentation/contribution scores) + prioritized suggestions each matched to a real reviewer comment. |
+| 📚 **Library** | Crawl any OpenReview venue, re-fetch reviews, and browse database stats. |
+| 🧠 **Memory** | Episodic query history + semantic preference vectors. Surface newly crawled papers that match your interests. |
 
 ---
 
-## Supported Venues
+## 🏛️ Supported Venues
 
-Preset: **NeurIPS, ICML, ICLR, AISTATS, UAI, CoRL, COLM, RLC**
+**NeurIPS · ICML · ICLR · AISTATS · UAI · CoRL · COLM · RLC**
 
-These venues publish submissions and open peer reviews directly on OpenReview, enabling full crawling without authentication. ACL-family venues (ACL, EMNLP, NAACL) use ACL Rolling Review with access-controlled reviews — they are not included as crawl presets but the Diagnosis Agent's simulated review supports them as target venues.
-
-Any OpenReview venue can be discovered and crawled via the Library page.
+All publish submissions and open peer reviews on OpenReview — no authentication required.
+Any other OpenReview venue can be discovered and indexed via the Library page.
 
 ---
 
-## Setup
+## 🚀 Setup
 
 **1. Install dependencies**
 
@@ -68,101 +40,85 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env`:
-
 ```env
-# LLM (agents + report generation)
 LLM_API_KEY=sk-...
-LLM_BASE_URL=          # leave blank for OpenAI, or any compatible endpoint
-LLM_MODEL=gpt-4o       # or any compatible model name
+LLM_BASE_URL=           # leave blank for OpenAI, or any compatible endpoint
+LLM_MODEL=gpt-4o
 
-# Embeddings (any OpenAI-compatible endpoint)
-EMBEDDING_API_KEY=     # falls back to LLM_API_KEY if blank
-EMBEDDING_BASE_URL=    # e.g. https://cloud.infini-ai.com/maas/v1
+EMBEDDING_API_KEY=      # falls back to LLM_API_KEY if blank
+EMBEDDING_BASE_URL=     # e.g. https://cloud.infini-ai.com/maas/v1
 EMBEDDING_MODEL=text-embedding-3-large
 ```
 
-**3. Launch the web interface**
+**3. Launch**
 
 ```bash
 streamlit run app.py
 ```
 
-On first launch, an onboarding wizard detects an empty database and offers a one-click crawl setup.
+On first launch, an onboarding wizard detects an empty database and offers a one-click crawl setup for top conferences + last 3 years.
 
-**4. Or crawl directly via CLI**
+**4. CLI (optional)**
 
 ```bash
 python main.py crawl --conference NeurIPS --year 2024
-python main.py crawl --conference ICLR --year 2024
-
-# Search via CLI
 python main.py search "efficient attention mechanisms" --decision oral spotlight --top-k 20
 ```
 
 ---
 
-## Project Structure
-
-```
-src/paperradar/
-├── config.py              # All settings, loaded from .env
-├── schemas/               # Pydantic v2 models: papers, tools, agent states, survey, diagnosis
-├── crawl/                 # OpenReview crawler, async review fetcher, crawl pipeline
-├── store/                 # ChromaDB manager (singleton), BM25 index (singleton), SQLite episodic store
-├── retrieval/             # Embedder, hybrid search (RRF fusion), filter builders
-├── analysis/              # Temporal trends, K-Means clustering, gap detection
-├── memory/                # Episodic memory, semantic preferences, push engine
-├── agent/                 # LangGraph graphs, tools, runners
-│   ├── research_graph.py  # retrieve → analyze → synthesize_survey
-│   ├── research_runner.py
-│   ├── diagnosis_graph.py # detect → search → review_analysis → diagnose
-│   └── diagnosis_runner.py
-└── utils/                 # PDF text extraction
-
-pages/
-├── home.py                # Home page + onboarding wizard
-├── 2_Agent.py             # Research Agent (multi-turn clarification + survey)
-├── 6_Diagnose.py          # Diagnosis Agent (PDF upload + simulated review)
-├── 1_Search.py            # Hybrid paper search
-├── 3_Analysis.py          # Temporal trends, clustering, gap detection
-├── 4_Library.py           # Crawl management, database stats
-└── 5_Memory.py            # Query history, liked papers, push recommendations
-
-app.py                     # Streamlit entry point + navigation (st.navigation with sections)
-main.py                    # CLI entry point
-```
-
----
-
-## Architecture Overview
+## 🏗️ Architecture
 
 ```
 OpenReview API (api2.openreview.net)
       │
-  CrawlPipeline ──► ChromaDB  (papers_content, papers_reviews, user_preferences)
-                └─► BM25Index (pickle, process singleton)
-                └─► SQLite    (crawl_log, episodic_events)
+  CrawlPipeline ──► ChromaDB  (papers_content · papers_reviews · user_preferences)
+                └─► BM25Index
+                └─► SQLite    (crawl_log · episodic memory)
 
 Query / PDF
   │
 HybridSearcher
-  ├── BM25 score
+  ├── BM25 keyword score
   ├── papers_content vector score
-  └── papers_reviews vector score
-        └── RRF fusion ──► ranked PaperResult list
+  └── papers_reviews vector score   ← reviewer signal search
+        └── RRF fusion ──► ranked results
 
-Research Agent (LangGraph)           Diagnosis Agent (LangGraph)
-  clarify (plain LLM, multi-turn)      detect_node  (LLM → domain + keywords)
-  │                                    search_node  (hybrid search, split by decision)
-  └─► retrieve_node  (search_papers)   review_analysis_node (cluster + reviews)
-      analyze_node   (temporal trend)  diagnose_node (LLM → SimulatedReview + suggestions)
-      synthesize_survey_node (LLM)
+📝 Research Agent (LangGraph)      🩺 Diagnosis Agent (LangGraph)
+  clarify (multi-turn)               detect  (domain + keywords)
+  retrieve (hybrid search)           search  (accepted + rejected)
+  analyze  (temporal trends)         review_analysis (K-Means clusters)
+  synthesize_survey (LLM)            diagnose (SimulatedReview + suggestions)
 ```
 
 ---
 
-## Environment Variables Reference
+## 📁 Project Structure
+
+```
+src/paperradar/
+├── config.py              # All settings, loaded from .env
+├── schemas/               # Pydantic v2: papers, tools, agent states, survey, diagnosis
+├── crawl/                 # OpenReview crawler, async review fetcher, crawl pipeline
+├── store/                 # ChromaDB (singleton), BM25 (singleton), SQLite episodic store
+├── retrieval/             # Embedder, hybrid search, RRF fusion
+├── analysis/              # Temporal trends, K-Means clustering, gap detection
+├── memory/                # Episodic memory, semantic preferences, push engine
+└── agent/                 # LangGraph graphs + runners (research, diagnosis)
+
+pages/
+├── home.py                # Home + onboarding wizard
+├── 2_Agent.py             # Research Agent
+├── 6_Diagnose.py          # Diagnosis Agent
+├── 1_Search.py            # Hybrid paper search
+├── 3_Analysis.py          # Trends + clustering
+├── 4_Library.py           # Crawl management + database stats
+└── 5_Memory.py            # Query history + push recommendations
+```
+
+---
+
+## ⚙️ Environment Variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -171,31 +127,25 @@ Research Agent (LangGraph)           Diagnosis Agent (LangGraph)
 | `LLM_MODEL` | No | `gpt-4o` | Model name |
 | `EMBEDDING_API_KEY` | No | = `LLM_API_KEY` | Embedding API key |
 | `EMBEDDING_BASE_URL` | No | OpenAI | Embedding endpoint base URL |
-| `EMBEDDING_MODEL` | No | `text-embedding-3-large` | Embedding model name |
+| `EMBEDDING_MODEL` | No | `text-embedding-3-large` | Embedding model |
 
 ---
 
-## Data Source
+## 🗂️ Data Source
 
-All paper and review data is fetched from [OpenReview](https://openreview.net) via the public API (`api2.openreview.net`), the platform's official documented endpoint for programmatic access. OpenReview publishes submissions and peer reviews openly as part of its mission to make academic review transparent.
-
-- Data is attributed to OpenReview and the respective authors and reviewers.
-- PaperRadar stores data locally for personal research use only. Do not redistribute crawled data or use it for commercial purposes.
-- Requests are rate-limited (batch sleep 1 s, per-request sleep 0.5 s) to avoid overloading the service.
-- See [OpenReview Terms of Use](https://openreview.net/legal/terms) for full details.
+Paper and review data is fetched from [OpenReview](https://openreview.net) via the public API (`api2.openreview.net`). Data is stored locally for personal research use only — do not redistribute. Requests are rate-limited (batch sleep 1s, per-request 0.5s) to avoid overloading the service. See [OpenReview Terms of Use](https://openreview.net/legal/terms).
 
 ---
 
-## TODO
+## 🗺️ Roadmap
 
-
-- [ ] **Multi-user support** — isolate episodic memory and preference vectors per user identity for lab sharing.
-- [ ] **Scheduled push notifications** — run the push engine on a cron schedule and deliver alerts via email or Slack webhook.
-- [ ] **More agents** — e.g. a Writing Agent (improve your paper section by section against reviewer patterns), a Trend Agent (weekly digest of new papers matching your interests).
-- [ ] **Conference-specific schema alignment** — normalize review forms, score scales (1–10 vs. 1–4), confidence ratings, and ethics checkboxes across venues (NeurIPS/ICML/ICLR/COLM/etc.) instead of hard-coding OpenReview defaults.
+- [ ] **Writing Agent** — improve your paper section by section guided by real reviewer patterns
+- [ ] **Scheduled push notifications** — email / Slack digest of new papers matching your interests
+- [ ] **Multi-user support** — isolated memory and preference vectors per user identity
+- [ ] **Score normalization** — unify review scales across venues (NeurIPS 1–10, ICLR 1–10, COLM 1–5, …)
 
 ---
 
-## License
+## 📄 License
 
 MIT
