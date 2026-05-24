@@ -63,6 +63,7 @@ class DiagnosisState(BaseModel):
     review_patterns: Optional[object] = None
     retrieved_reviews: Optional[dict] = None
     report: Optional[DiagnosisReport] = None
+    memory_context: Optional[str] = None
     active_node: str = "detect"
     tool_call_count: int = 0
     iteration: int = 0

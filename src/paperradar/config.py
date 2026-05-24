@@ -94,6 +94,7 @@ class ChromaConfig:
     col_papers_content: str = "papers_content"
     col_papers_reviews: str = "papers_reviews"
     col_user_preferences: str = "user_preferences"
+    col_agent_memory: str = "agent_memory"
 
 
 @dataclass
@@ -119,6 +120,14 @@ class AgentConfig:
 
 
 @dataclass
+class RemoteMCPConfig:
+    url: Optional[str] = field(
+        default_factory=lambda: os.getenv("REMOTE_MCP_URL") or None
+    )
+    timeout: int = 30
+
+
+@dataclass
 class Settings:
     openreview: OpenReviewConfig = field(default_factory=OpenReviewConfig)
     conferences: ConferenceConfig = field(default_factory=ConferenceConfig)
@@ -127,8 +136,10 @@ class Settings:
     sqlite: SQLiteConfig = field(default_factory=SQLiteConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    remote_mcp: RemoteMCPConfig = field(default_factory=RemoteMCPConfig)
     raw_data_dir: str = "data/raw"
     bm25_index_path: str = "data/bm25_index.pkl"
+    memories_dir: str = "data/memories"
 
 
 settings = Settings()

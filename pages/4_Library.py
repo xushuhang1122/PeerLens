@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, ".")
 
 from src.paperradar.config import settings
+from src.paperradar.agent.tools_remote import is_remote_mode
 from src.paperradar.crawl.discover import discover_venue
 from src.paperradar.crawl.pipeline import CrawlPipeline, is_crawl_running, get_crawl_progress
 from src.paperradar.store.chroma import ChromaManager
@@ -144,6 +145,12 @@ with tab_db:
 # -----------------------------------------------------------------------
 with tab_crawl:
     st.subheader("Crawl a Conference into the Database")
+    if is_remote_mode():
+        st.info(
+            "The remote database already contains NeurIPS, ICML, and ICLR (2022-2025). "
+            "Crawling here adds data to your **local** database only and does not affect the remote.",
+            icon=":material/cloud_done:",
+        )
 
     mode = st.radio(
         "Conference source",

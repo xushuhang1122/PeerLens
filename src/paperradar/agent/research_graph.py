@@ -22,7 +22,11 @@ _llm = ChatOpenAI(
 # ------------------------------------------------------------------
 
 def retrieve_node(state: ResearchAgentState) -> dict[str, Any]:
-    from .tools import search_papers
+    from .tools import search_papers as _local_search_papers
+    from .tools_remote import resolve_tool
+    from ..schemas.tools import SearchPapersOutput
+
+    _search = resolve_tool("search_papers", _local_search_papers)
 
     focus = state.focus or {}
     query = state.refined_query or state.raw_query
@@ -31,13 +35,14 @@ def retrieve_node(state: ResearchAgentState) -> dict[str, Any]:
     decisions = focus.get("decisions") or None
 
     try:
-        results = search_papers.invoke({
+        raw = _search.invoke({
             "query": query,
             "conference_filter": conferences,
             "year_filter": [int(y) for y in years],
             "decision_filter": decisions,
             "top_k": 30,
         })
+        results = SearchPapersOutput(**raw) if isinstance(raw, dict) else raw
     except Exception as e:
         return {
             "messages": [AIMessage(content=f"Search failed: {e}")],
@@ -52,7 +57,11 @@ def retrieve_node(state: ResearchAgentState) -> dict[str, Any]:
 
 
 def analyze_node(state: ResearchAgentState) -> dict[str, Any]:
-    from .tools import analyze_temporal_distribution
+    from .tools import analyze_temporal_distribution as _local_temporal
+    from .tools_remote import resolve_tool
+    from ..schemas.tools import TemporalAnalysis
+
+    _temporal_tool = resolve_tool("analyze_temporal_distribution", _local_temporal)
 
     focus = state.focus or {}
     query = state.refined_query or state.raw_query
@@ -63,11 +72,12 @@ def analyze_node(state: ResearchAgentState) -> dict[str, Any]:
     msgs: list[Any] = []
 
     try:
-        temporal = analyze_temporal_distribution.invoke({
+        raw_t = _temporal_tool.invoke({
             "topic": query,
             "conferences": conferences,
             "years": [int(y) for y in years],
         })
+        temporal = TemporalAnalysis(**raw_t) if isinstance(raw_t, dict) else raw_t
         updates["temporal_analysis"] = temporal
         msgs.append(AIMessage(content=f"Temporal trend: {temporal.trend}"))
     except Exception as e:
@@ -104,6 +114,13 @@ def synthesize_survey_node(state: ResearchAgentState) -> dict[str, Any]:
             f"Trend: {t.trend}. Peak: {t.peak_conference} {t.peak_year}. {t.summary}"
         )
 
+    memory_section = ""
+    if state.memory_context:
+        memory_section = (
+            f"\n== YOUR RESEARCH HISTORY ==\n{state.memory_context}\n"
+            "In submission_advice, reference relevant past work or diagnoses if applicable.\n"
+        )
+
     synthesis_prompt = f"""You are writing a mini literature survey on: "{topic}"
 
 == PAPERS IN DATABASE ==
@@ -111,7 +128,7 @@ def synthesize_survey_node(state: ResearchAgentState) -> dict[str, Any]:
 
 == TREND DATA ==
 {temporal_block or "(not available)"}
-
+{memory_section}
 == TASK ==
 Write a structured literature survey. Output a JSON object with this EXACT schema:
 

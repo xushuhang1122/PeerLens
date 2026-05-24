@@ -4,6 +4,28 @@ import io
 import re
 
 
+_BODY_END_PATTERNS = [
+    re.compile(r"^\s*(Appendix|APPENDIX)\b", re.MULTILINE),
+    re.compile(r"^\s*A\.\s+[A-Z]", re.MULTILINE),
+    re.compile(r"^\s*(References|REFERENCES|Bibliography|BIBLIOGRAPHY)\s*$", re.MULTILINE),
+    re.compile(r"^\s*Acknowledgements?\b", re.MULTILINE | re.IGNORECASE),
+]
+
+
+def extract_body_text(text: str, max_words: int = 10_000) -> str:
+    """Strip appendix/references sections, then truncate to max_words."""
+    cutoff = len(text)
+    for pat in _BODY_END_PATTERNS:
+        m = pat.search(text)
+        if m and m.start() < cutoff:
+            cutoff = m.start()
+    body = text[:cutoff]
+    words = body.split()
+    if len(words) > max_words:
+        body = " ".join(words[:max_words]) + "\n[truncated]"
+    return body.strip()
+
+
 def extract_paper_text(pdf_bytes: bytes, max_words: int = 1500) -> str:
     """Extract plain text from a PDF up to max_words, preserving line structure."""
     from pypdf import PdfReader

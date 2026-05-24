@@ -92,6 +92,18 @@ def _show_home():
     st.title("PeerLens")
     st.caption("Peer review-powered ML research assistant")
 
+    if settings.remote_mcp.url:
+        st.success(
+            f"Connected to remote database at `{settings.remote_mcp.url}` — "
+            "no local crawling required.",
+            icon=":material/cloud_done:",
+        )
+    else:
+        st.info(
+            "Running in local mode. Use the **Library** page to crawl conference data.",
+            icon=":material/storage:",
+        )
+
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.page_link("pages/1_Search.py", label="Search Papers", icon=":material/search:")

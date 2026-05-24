@@ -33,6 +33,19 @@ CREATE TABLE IF NOT EXISTS crawl_log (
     status       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_crawl_conf_year ON crawl_log(conference, year);
+
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    session_id       TEXT PRIMARY KEY,
+    agent_type       TEXT NOT NULL,
+    timestamp        TEXT NOT NULL,
+    input_summary    TEXT NOT NULL,
+    output_summary   TEXT NOT NULL,
+    key_findings     TEXT NOT NULL DEFAULT '[]',
+    tags             TEXT NOT NULL DEFAULT '[]',
+    full_report_path TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_agent_type ON agent_sessions(agent_type);
+CREATE INDEX IF NOT EXISTS idx_sessions_timestamp  ON agent_sessions(timestamp);
 """
 
 
@@ -133,3 +146,71 @@ class EpisodicStore:
                 (conference, year),
             ).fetchone()
         return row is not None
+
+    def save_agent_session(
+        self,
+        session_id: str,
+        agent_type: str,
+        timestamp: str,
+        input_summary: str,
+        output_summary: str,
+        key_findings: list[str],
+        tags: list[str],
+        full_report_path: str = "",
+    ) -> None:
+        import json
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO agent_sessions
+                   (session_id, agent_type, timestamp, input_summary, output_summary,
+                    key_findings, tags, full_report_path)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    agent_type,
+                    timestamp,
+                    input_summary,
+                    output_summary,
+                    json.dumps(key_findings, ensure_ascii=False),
+                    json.dumps(tags, ensure_ascii=False),
+                    full_report_path,
+                ),
+            )
+
+    def get_recent_sessions(
+        self, agent_type: str | None = None, limit: int = 20
+    ) -> list[dict]:
+        import json
+        with self._conn() as conn:
+            if agent_type:
+                rows = conn.execute(
+                    "SELECT * FROM agent_sessions WHERE agent_type=? "
+                    "ORDER BY timestamp DESC LIMIT ?",
+                    (agent_type, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM agent_sessions ORDER BY timestamp DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["key_findings"] = json.loads(d.get("key_findings", "[]"))
+            d["tags"] = json.loads(d.get("tags", "[]"))
+            result.append(d)
+        return result
+
+    def get_session_by_id(self, session_id: str) -> dict | None:
+        import json
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM agent_sessions WHERE session_id=?",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["key_findings"] = json.loads(d.get("key_findings", "[]"))
+        d["tags"] = json.loads(d.get("tags", "[]"))
+        return d

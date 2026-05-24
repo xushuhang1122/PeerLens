@@ -83,6 +83,10 @@ class ChromaManager:
             settings.chroma.col_user_preferences,
             metadata={"hnsw:space": "cosine"},
         )
+        self._agent_memory = self._client.get_or_create_collection(
+            settings.chroma.col_agent_memory,
+            metadata={"hnsw:space": "cosine"},
+        )
         self._initialized = True
 
     # ------------------------------------------------------------------
@@ -210,3 +214,36 @@ class ChromaManager:
             n_results=n_results,
             include=["metadatas", "distances"],
         )
+
+    # ------------------------------------------------------------------
+    # Agent memory collection
+    # ------------------------------------------------------------------
+
+    def upsert_agent_memory(
+        self,
+        session_id: str,
+        embedding: list[float],
+        document: str,
+        metadata: dict,
+    ) -> None:
+        self._agent_memory.upsert(
+            ids=[session_id],
+            embeddings=[embedding],
+            documents=[document],
+            metadatas=[metadata],
+        )
+
+    def query_agent_memory(
+        self,
+        query_embedding: list[float],
+        n_results: int = 5,
+        where: Optional[dict] = None,
+    ) -> dict:
+        kwargs: dict[str, Any] = {
+            "query_embeddings": [query_embedding],
+            "n_results": n_results,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if where:
+            kwargs["where"] = where
+        return self._agent_memory.query(**kwargs)

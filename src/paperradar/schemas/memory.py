@@ -23,3 +23,14 @@ class UserPreferenceEmbedding(BaseModel):
     source: Literal["liked_paper", "liked_topic", "query_history"]
     paper_id: Optional[str] = None
     timestamp: str = ""
+
+
+class AgentSession(BaseModel):
+    session_id: str
+    agent_type: Literal["diagnosis", "research", "reading"]
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    input_summary: str
+    output_summary: str
+    key_findings: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    full_report_path: str = ""

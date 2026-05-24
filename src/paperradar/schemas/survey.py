@@ -36,6 +36,7 @@ class ResearchAgentState(BaseModel):
     temporal_analysis: Optional[TemporalAnalysis] = None
     gap_report: Optional[GapReport] = None
     survey_report: Optional[SurveyReport] = None
+    memory_context: Optional[str] = None
     active_node: str = "refine"
     tool_call_count: int = 0
     iteration: int = 0

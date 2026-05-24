@@ -72,7 +72,11 @@ Respond with ONLY a JSON object:
 
 
 def search_node(state: DiagnosisState) -> dict[str, Any]:
-    from .tools import search_papers
+    from .tools import search_papers as _local_search_papers
+    from .tools_remote import resolve_tool
+    from ..schemas.tools import SearchPapersOutput
+
+    _search = resolve_tool("search_papers", _local_search_papers)
 
     domain = state.detected_domain
     keywords = " ".join(state.detected_keywords[:6])
@@ -82,10 +86,11 @@ def search_node(state: DiagnosisState) -> dict[str, Any]:
     msgs: list[Any] = []
 
     try:
-        result = search_papers.invoke({
+        raw = _search.invoke({
             "query": query,
             "top_k": 20,
         })
+        result = SearchPapersOutput(**raw) if isinstance(raw, dict) else raw
         all_papers: list[PaperResult] = result.results
 
         accepted = [p for p in all_papers if p.decision in ("oral", "spotlight", "poster", "accepted")]
@@ -104,17 +109,23 @@ def search_node(state: DiagnosisState) -> dict[str, Any]:
 
 
 def review_analysis_node(state: DiagnosisState) -> dict[str, Any]:
-    from .tools import cluster_reviews, get_paper_reviews
+    from .tools import cluster_reviews as _local_cluster, get_paper_reviews as _local_reviews
+    from .tools_remote import resolve_tool
+    from ..schemas.tools import ClusterAnalysis, GetPaperReviewsOutput
+
+    _cluster = resolve_tool("cluster_reviews", _local_cluster)
+    _reviews_tool = resolve_tool("get_paper_reviews", _local_reviews)
 
     domain = state.detected_domain
     updates: dict[str, Any] = {"iteration": state.iteration + 1}
     msgs: list[Any] = []
 
     try:
-        patterns = cluster_reviews.invoke({
+        raw_p = _cluster.invoke({
             "primary_area": domain,
             "n_clusters": 5,
         })
+        patterns = ClusterAnalysis(**raw_p) if isinstance(raw_p, dict) else raw_p
         updates["review_patterns"] = patterns
         msgs.append(AIMessage(content=f"Cluster analysis: {len(patterns.clusters)} clusters found"))
     except Exception as e:
@@ -126,8 +137,13 @@ def review_analysis_node(state: DiagnosisState) -> dict[str, Any]:
 
     if paper_ids:
         try:
-            reviews = get_paper_reviews.invoke({"paper_ids": paper_ids})
-            excerpts = [r.full_text[:600] for r in reviews.results[:8] if r.full_text]
+            raw_r = _reviews_tool.invoke({"paper_ids": paper_ids})
+            reviews = GetPaperReviewsOutput(**raw_r) if isinstance(raw_r, dict) else raw_r
+            excerpts = []
+            for r in reviews.results[:8]:
+                text = r.reviews[0].get("text", "") if r.reviews else ""
+                if text:
+                    excerpts.append(text[:600])
             updates["retrieved_reviews"] = {
                 "count": len(reviews.results),
                 "excerpts": excerpts,
@@ -281,6 +297,12 @@ def diagnose_node(state: DiagnosisState) -> dict[str, Any]:
 
     venue_criteria = _get_venue_criteria(target_venue)
     venue_section = f"\n== TARGET VENUE ==\n{venue_criteria}\n" if venue_criteria else ""
+    memory_section = ""
+    if state.memory_context:
+        memory_section = (
+            f"\n== YOUR RESEARCH HISTORY ==\n{state.memory_context}\n"
+            "When writing overall_assessment, reference any relevant connection to past work if applicable.\n"
+        )
 
     recommendation_instructions = (
         f"For {target_venue}, choose the recommendation label that best matches this venue's decision vocabulary. "
@@ -298,7 +320,7 @@ def diagnose_node(state: DiagnosisState) -> dict[str, Any]:
     )
 
     prompt = f"""You are an expert academic reviewer simulating a thorough peer review for an ML/AI paper.
-{venue_section}
+{venue_section}{memory_section}
 == PAPER BEING REVIEWED ==
 Domain: {domain}
 Keywords: {', '.join(keywords)}
