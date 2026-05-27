@@ -1,4 +1,5 @@
 import streamlit as st
+from src.paperradar.config import settings
 
 st.set_page_config(
     page_title="PeerLens",
@@ -6,6 +7,30 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ── Data source selector (persists across pages via session_state) ─────────────
+_default_url = settings.remote_mcp.url or ""
+if "remote_mcp_url" not in st.session_state:
+    st.session_state["remote_mcp_url"] = _default_url or None
+
+with st.sidebar:
+    st.caption("Data Source")
+    _use_remote = st.toggle(
+        "Remote MCP",
+        value=bool(st.session_state["remote_mcp_url"]),
+        help="Use the shared cloud database instead of a local one.",
+    )
+    if _use_remote:
+        _url = st.text_input(
+            "MCP URL",
+            value=st.session_state["remote_mcp_url"] or _default_url,
+            placeholder="http://your-server:8765/mcp",
+            label_visibility="collapsed",
+        )
+        st.session_state["remote_mcp_url"] = _url.strip() or None
+    else:
+        st.session_state["remote_mcp_url"] = None
+    st.divider()
 
 pg = st.navigation(
     {

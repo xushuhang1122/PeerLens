@@ -12,43 +12,53 @@ _REMOTE_TOOL_NAMES = {
     "identify_research_gaps",
 }
 
-_remote_cache: dict[str, Any] | None = None
+# Cache keyed by URL so switching servers doesn't serve stale tools.
+_url_cache: dict[str, dict[str, Any]] = {}
+
+
+def _active_url() -> str | None:
+    """Return the MCP URL for this request.
+
+    Priority: Streamlit session_state (per-user toggle) > env var (default).
+    Falls back gracefully when called outside a Streamlit context.
+    """
+    try:
+        import streamlit as st
+        return st.session_state.get("remote_mcp_url", settings.remote_mcp.url)
+    except Exception:
+        return settings.remote_mcp.url
 
 
 def is_remote_mode() -> bool:
-    return bool(settings.remote_mcp.url)
+    return bool(_active_url())
 
 
-def _load_mcp_tools() -> dict[str, Any]:
+def _load_mcp_tools(url: str) -> dict[str, Any]:
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
     client = MultiServerMCPClient(
-        {
-            "peerlens": {
-                "url": settings.remote_mcp.url,
-                "transport": "streamable_http",
-            }
-        }
+        {"peerlens": {"url": url, "transport": "streamable_http"}}
     )
     tools = client.get_tools()
     return {t.name: t for t in tools if t.name in _REMOTE_TOOL_NAMES}
 
 
 def get_remote_tool(name: str) -> Any:
-    global _remote_cache
-    if _remote_cache is None:
-        _remote_cache = _load_mcp_tools()
-    tool = _remote_cache.get(name)
+    url = _active_url()
+    if not url:
+        raise RuntimeError("No remote MCP URL configured.")
+    if url not in _url_cache:
+        _url_cache[url] = _load_mcp_tools(url)
+    tool = _url_cache[url].get(name)
     if tool is None:
         raise RuntimeError(
             f"Remote MCP tool '{name}' not found. "
-            f"Available: {list(_remote_cache.keys())}"
+            f"Available: {list(_url_cache[url].keys())}"
         )
     return tool
 
 
 def resolve_tool(name: str, local_tool: Any) -> Any:
-    """Return the remote MCP tool if in remote mode, otherwise the local tool."""
     if is_remote_mode():
         return get_remote_tool(name)
     return local_tool
