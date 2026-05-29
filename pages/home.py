@@ -1,12 +1,12 @@
-import datetime
+﻿import datetime
 import sys
 sys.path.insert(0, ".")
 
 import streamlit as st
 
-from src.paperradar.config import settings
-from src.paperradar.store.chroma import ChromaManager
-from src.paperradar.crawl.pipeline import CrawlPipeline, is_crawl_running
+from src.peerlens.config import settings
+from src.peerlens.store.chroma import ChromaManager
+from src.peerlens.crawl.pipeline import CrawlPipeline, is_crawl_running
 
 
 @st.cache_resource
@@ -92,9 +92,10 @@ def _show_home():
     st.title("PeerLens")
     st.caption("Peer review-powered ML research assistant")
 
-    if settings.remote_mcp.url:
+    _active_url = st.session_state.get("remote_mcp_url") or settings.remote_mcp.url
+    if _active_url:
         st.success(
-            f"Connected to remote database at `{settings.remote_mcp.url}` — "
+            f"Connected to remote database at `{_active_url}` — "
             "no local crawling required.",
             icon=":material/cloud_done:",
         )

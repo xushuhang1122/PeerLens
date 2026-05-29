@@ -3,9 +3,8 @@ sys.path.insert(0, ".")
 
 import streamlit as st
 
-from src.paperradar.utils.pdf_parser import extract_paper_text, extract_title_abstract
-from src.paperradar.agent.diagnosis_runner import stream_diagnosis_agent
-from src.paperradar.schemas.diagnosis import SimulatedReview
+from src.peerlens.utils.pdf_parser import extract_full_paper_text, extract_title_abstract
+from src.peerlens.agent.diagnosis_runner import stream_diagnosis_agent
 
 _KNOWN_VENUES = [
     "NeurIPS 2026", "ICML 2026", "ICLR 2026",
@@ -16,90 +15,187 @@ _KNOWN_VENUES = [
     "JMLR",
 ]
 
-_PRIORITY_COLOR = {"critical": "red", "important": "orange", "minor": "blue"}
+_REPAIR_LABEL = {
+    "one_day_revision": "Revision (< 1 day)",
+    "needs_experiment": "Needs experiment",
+    "needs_redesign": "Structural redesign",
+}
+_REPAIR_ORDER = {"one_day_revision": 0, "needs_experiment": 1, "needs_redesign": 2}
+_REPAIR_COLOR = {"one_day_revision": "green", "needs_experiment": "orange", "needs_redesign": "red"}
+
+_NATURE_LABEL = {
+    "content_missing": "Content missing",
+    "expression_issue": "Expression issue",
+    "design_flaw": "Design flaw",
+}
+_NATURE_COLOR = {"content_missing": "orange", "expression_issue": "blue", "design_flaw": "red"}
+
+_CONF_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
-def _render_score_chip(label: str, value: int, max_val: int) -> None:
-    st.metric(label=label, value=f"{value}/{max_val}")
+def _sort_findings(findings):
+    return sorted(
+        findings,
+        key=lambda f: (
+            _REPAIR_ORDER.get(f.repair_cost, 9),
+            1 if f.confidence == "low" and "[counterevidence" in f.confidence_reason else 0,
+            _CONF_ORDER.get(f.confidence, 9),
+        ),
+    )
 
 
-def _render_simulated_review(rev: SimulatedReview) -> None:
-    venue_label = f" — {rev.venue}" if rev.venue else ""
-    st.subheader(f"Simulated Peer Review{venue_label}")
-    with st.container(border=True):
-        st.markdown(f"### {rev.recommendation}")
-        if rev.score_interpretation:
-            st.caption(rev.score_interpretation)
+def _report_to_markdown(report, paper_title: str = "") -> str:
+    from datetime import datetime
 
-        cols = st.columns(4)
-        with cols[0]:
-            _render_score_chip(f"Soundness ({rev.soundness_scale})", rev.soundness, int(rev.soundness_scale.split("-")[-1]))
-        with cols[1]:
-            _render_score_chip(f"Presentation ({rev.presentation_scale})", rev.presentation, int(rev.presentation_scale.split("-")[-1]))
-        with cols[2]:
-            _render_score_chip(f"Contribution ({rev.contribution_scale})", rev.contribution, int(rev.contribution_scale.split("-")[-1]))
-        with cols[3]:
-            _render_score_chip(f"Confidence ({rev.confidence_scale})", rev.confidence, int(rev.confidence_scale.split("-")[-1]))
+    lines: list[str] = []
+    title = paper_title or report.detected_domain
+    lines += [f"# Diagnosis Report — {title}", ""]
+    lines += [f"_Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}_", ""]
 
-        if rev.summary:
-            st.markdown(f"**Verdict:** {rev.summary}")
+    if report.detected_keywords:
+        lines += [f"**Domain:** {report.detected_domain}", ""]
+        lines += ["**Keywords:** " + " · ".join(f"`{k}`" for k in report.detected_keywords), ""]
 
-        tab_s, tab_w, tab_q = st.tabs(["Strengths", "Weaknesses", "Questions to Authors"])
-        with tab_s:
-            for s in rev.strengths:
-                st.markdown(f"- {s}")
-        with tab_w:
-            for w in rev.weaknesses:
-                st.markdown(f"- {w}")
-        with tab_q:
-            for q in rev.questions:
-                st.markdown(f"- {q}")
+    # 1. Executive Summary
+    if report.executive_summary:
+        lines += ["## Executive Summary", "", report.executive_summary, ""]
+
+    # 2. Priority Fix List
+    if report.findings:
+        lines += ["## Priority Fix List", ""]
+        evidence_map = {u.finding_id: u for u in report.evidence_updates}
+        for f in _sort_findings(report.findings):
+            repair = _REPAIR_LABEL.get(f.repair_cost, f.repair_cost)
+            nature = _NATURE_LABEL.get(f.nature, f.nature)
+            lines.append(f"### [{repair}] {f.id}")
+            lines.append(f"**Nature:** {nature}  |  **Confidence:** {f.confidence}")
+            lines.append("")
+            lines.append(f.problem)
+            if f.confidence_reason:
+                lines.append(f"")
+                lines.append(f"_Note: {f.confidence_reason}_")
+            ev = evidence_map.get(f.id)
+            if ev and ev.evidence_quote:
+                lines.append(f"")
+                lines.append(f"> Evidence ({ev.verdict}): {ev.evidence_quote}")
+            lines.append("")
+
+    # 3. Specific Suggestions (one_day_revision only)
+    quick_fixes = [f for f in report.findings if f.repair_cost == "one_day_revision"]
+    if quick_fixes:
+        lines += ["## Specific Suggestions", ""]
+        evidence_map = {u.finding_id: u for u in report.evidence_updates}
+        for f in quick_fixes:
+            lines.append(f"**{f.id}:** {f.problem}")
+            ev = evidence_map.get(f.id)
+            if ev and ev.verdict == "confirmed" and ev.evidence_quote:
+                lines.append(f"> {ev.evidence_quote}")
+            lines.append("")
+
+    # 4. Writing Issues
+    if report.writing_issues:
+        lines += ["## Writing Issues", ""]
+        for wi in report.writing_issues:
+            if wi.quote:
+                lines.append(f'- `"{wi.quote}"` — {wi.issue}')
+                if wi.suggestion:
+                    lines.append(f'  - Suggestion: {wi.suggestion}')
+        lines.append("")
+
+    # Similar papers
+    if report.similar_accepted:
+        lines += ["## Similar Accepted Papers", ""]
+        for p in report.similar_accepted:
+            link = f"[{p.title}]({p.forum_url})" if p.forum_url else p.title
+            lines.append(f"- **{link}** — {p.conference} {p.year} `{p.decision}`")
+        lines.append("")
+
+    if report.similar_rejected:
+        lines += ["## Similar Rejected Papers", ""]
+        for p in report.similar_rejected:
+            link = f"[{p.title}]({p.forum_url})" if p.forum_url else p.title
+            lines.append(f"- **{link}** — {p.conference} {p.year} `{p.decision}`")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def _render_report(report) -> None:
     st.subheader(f"Diagnosis Report — {report.detected_domain}")
 
     if report.detected_keywords:
-        st.markdown("**Keywords detected:** " + " | ".join(f"`{k}`" for k in report.detected_keywords))
+        st.markdown("**Keywords:** " + " | ".join(f"`{k}`" for k in report.detected_keywords))
 
-    st.markdown(f"**Overall assessment:** {report.overall_assessment}")
-
-    if report.simulated_review:
+    # 1. Executive Summary
+    if report.executive_summary:
         st.divider()
-        _render_simulated_review(report.simulated_review)
+        st.subheader("Executive Summary")
+        st.info(report.executive_summary)
 
-    st.divider()
-    col_acc, col_rej = st.columns(2)
-    with col_acc:
-        st.markdown("**Acceptance patterns in this area**")
-        for p in report.acceptance_patterns:
-            st.markdown(f"- {p}")
-    with col_rej:
-        st.markdown("**Common rejection patterns**")
-        for p in report.rejection_patterns:
-            st.markdown(f"- {p}")
+    # 2. Priority Fix List
+    if report.findings:
+        st.divider()
+        st.subheader("Priority Fix List")
+        evidence_map = {u.finding_id: u for u in report.evidence_updates}
 
-    if report.key_reviewer_concerns:
-        st.markdown("**Key reviewer concerns in this domain**")
-        for c in report.key_reviewer_concerns:
-            st.markdown(f"- {c}")
+        repair_groups: dict[str, list] = {}
+        for f in _sort_findings(report.findings):
+            repair_groups.setdefault(f.repair_cost, []).append(f)
 
-    st.divider()
-    st.subheader("Improvement Suggestions")
+        for repair_key in ("one_day_revision", "needs_experiment", "needs_redesign"):
+            group = repair_groups.get(repair_key, [])
+            if not group:
+                continue
+            repair_label = _REPAIR_LABEL.get(repair_key, repair_key)
+            repair_color = _REPAIR_COLOR.get(repair_key, "gray")
+            st.markdown(f"**:{repair_color}[{repair_label}]**")
+            for f in group:
+                nature_label = _NATURE_LABEL.get(f.nature, f.nature)
+                nature_color = _NATURE_COLOR.get(f.nature, "gray")
+                is_refuted = "[counterevidence" in f.confidence_reason
+                with st.container(border=True):
+                    col_id, col_tags = st.columns([1, 4])
+                    with col_id:
+                        st.markdown(f"**{f.id}**")
+                    with col_tags:
+                        st.markdown(
+                            f":{nature_color}[{nature_label}]"
+                            f"  confidence: `{f.confidence}`"
+                            + (" — :red[counterevidence found]" if is_refuted else "")
+                        )
+                    st.markdown(f.problem)
+                    if f.confidence_reason and f.confidence != "high":
+                        st.caption(f.confidence_reason)
+                    ev = evidence_map.get(f.id)
+                    if ev and ev.evidence_quote:
+                        with st.expander(f"Evidence ({ev.verdict})"):
+                            st.markdown(f"> {ev.evidence_quote}")
 
-    priority_order = {"critical": 0, "important": 1, "minor": 2}
-    sorted_suggestions = sorted(
-        report.suggestions,
-        key=lambda s: priority_order.get(s.priority.lower(), 3),
-    )
-    for s in sorted_suggestions:
-        color = _PRIORITY_COLOR.get(s.priority.lower(), "gray")
-        with st.container(border=True):
-            st.markdown(f"**:{color}[{s.priority.upper()}]** — **{s.aspect.title()}**")
-            if s.reviewer_comment:
-                st.markdown(f"*Reviewer comment:* _{s.reviewer_comment}_")
-            st.markdown(f"*Suggestion:* {s.suggestion}")
+    # 3. Specific Suggestions (one_day_revision)
+    quick_fixes = [f for f in report.findings if f.repair_cost == "one_day_revision"]
+    if quick_fixes:
+        st.divider()
+        st.subheader("Specific Suggestions")
+        evidence_map = {u.finding_id: u for u in report.evidence_updates}
+        for f in quick_fixes:
+            ev = evidence_map.get(f.id)
+            with st.container(border=True):
+                st.markdown(f"**{f.id}:** {f.problem}")
+                if ev and ev.verdict == "confirmed" and ev.evidence_quote:
+                    st.markdown(f"> {ev.evidence_quote}")
 
+    # 4. Writing Issues
+    if report.writing_issues:
+        st.divider()
+        st.subheader("Writing Issues")
+        with st.expander(f"{len(report.writing_issues)} issue(s) found", expanded=False):
+            for wi in report.writing_issues:
+                if wi.quote:
+                    st.markdown(f"- `\"{wi.quote}\"` — {wi.issue}")
+                    if wi.suggestion:
+                        st.caption(f"Suggestion: {wi.suggestion}")
+
+    # Similar papers tabs
     st.divider()
     tab_acc, tab_rej = st.tabs([
         f"Similar Accepted Papers ({len(report.similar_accepted)})",
@@ -137,7 +233,7 @@ def _render_report(report) -> None:
 st.title("Paper Diagnosis")
 st.caption(
     "Upload your paper (PDF). The agent will detect its domain, find similar accepted and rejected papers "
-    "in the database, simulate a peer review, and give you specific improvement suggestions."
+    "in the database, and give you a prioritized list of issues with repair cost estimates."
 )
 
 # ------------------------------------------------------------------
@@ -157,6 +253,16 @@ if existing_report:
                 st.session_state.pop(k, None)
             st.rerun()
 
+    paper_title = meta.get("title", "")
+    md_content = _report_to_markdown(existing_report, paper_title)
+    safe_name = (paper_title or existing_report.detected_domain).replace(" ", "_")[:60]
+    st.download_button(
+        label="Download Report (.md)",
+        data=md_content.encode("utf-8"),
+        file_name=f"diagnosis_{safe_name}.md",
+        mime="text/markdown",
+    )
+
     st.divider()
     _render_report(existing_report)
 
@@ -169,7 +275,7 @@ else:
     if uploaded is not None:
         pdf_bytes = uploaded.read()
         with st.spinner("Extracting text..."):
-            paper_text = extract_paper_text(pdf_bytes, max_words=1500)
+            paper_text = extract_full_paper_text(pdf_bytes)
             meta = extract_title_abstract(paper_text)
 
         col1, col2 = st.columns([3, 1])
@@ -187,7 +293,7 @@ else:
             "Target venue (optional)",
             options=[""] + _KNOWN_VENUES,
             format_func=lambda x: "Not specified (general review)" if x == "" else x,
-            help="Select or type a venue to get scoring and feedback tailored to that conference or journal's review criteria.",
+            help="Select or type a venue to get feedback tailored to that conference's review criteria.",
         )
         custom_venue = st.text_input(
             "Or enter a custom venue",

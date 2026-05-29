@@ -1,4 +1,4 @@
-import datetime
+﻿import datetime
 import sqlite3
 
 import pandas as pd
@@ -8,11 +8,11 @@ import streamlit as st
 import sys
 sys.path.insert(0, ".")
 
-from src.paperradar.config import settings
-from src.paperradar.agent.tools_remote import is_remote_mode
-from src.paperradar.crawl.discover import discover_venue
-from src.paperradar.crawl.pipeline import CrawlPipeline, is_crawl_running, get_crawl_progress
-from src.paperradar.store.chroma import ChromaManager
+from src.peerlens.config import settings
+from src.peerlens.agent.tools_remote import is_remote_mode
+from src.peerlens.crawl.discover import discover_venue
+from src.peerlens.crawl.pipeline import CrawlPipeline, is_crawl_running, get_crawl_progress
+from src.peerlens.store.chroma import ChromaManager
 
 
 @st.cache_resource
@@ -241,7 +241,7 @@ with tab_crawl:
         )
         import os
         from pathlib import Path
-        from src.paperradar.config import settings as _settings
+        from src.peerlens.config import settings as _settings
 
         raw_root = Path(_settings.raw_data_dir)
         available_pairs: list[tuple[str, int]] = []

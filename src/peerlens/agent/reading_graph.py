@@ -132,8 +132,9 @@ def inject_reviews_node(state: ReadingState) -> dict[str, Any]:
     if state.paper_id:
         paper_ids = [state.paper_id]
     elif state.paper_title:
-        # Try title-based lookup via vector search
+        # Try title-based lookup via vector search with string similarity guard
         try:
+            from difflib import SequenceMatcher
             from ..store.chroma import ChromaManager
             from ..retrieval.embedder import Embedder
             embedder = Embedder()
@@ -144,8 +145,12 @@ def inject_reviews_node(state: ReadingState) -> dict[str, Any]:
                 candidate_id = result["ids"][0][0]
                 meta = result.get("metadatas", [[]])[0]
                 candidate_title = meta[0].get("title", "") if meta else ""
-                # Accept if title similarity is plausible (very rough check)
-                if candidate_title and len(candidate_title) > 5:
+                sim = SequenceMatcher(
+                    None,
+                    state.paper_title.lower(),
+                    candidate_title.lower(),
+                ).ratio()
+                if sim >= 0.6:
                     paper_ids = [candidate_id]
         except Exception:
             pass
@@ -169,15 +174,12 @@ def inject_reviews_node(state: ReadingState) -> dict[str, Any]:
     return updates
 
 
-_DEEP_READ_SYSTEM = """\
+_DEEP_READ_SYSTEM_BASE = """\
 You are an expert academic reading assistant with deep knowledge of machine learning and AI research.
 Your task is to produce a thorough, structured reading report for the given paper.
 
-If reviewer perspectives are provided, incorporate them to give a balanced view of the paper's strengths and weaknesses.
-If research history is provided, identify meaningful connections between this paper and the user's past work.
-
 Respond with ONLY valid JSON matching this schema exactly:
-{
+{{
   "tldr": "One to two sentences summarizing the paper.",
   "problem_statement": "What problem does this paper solve and why does it matter?",
   "core_contributions": ["contribution 1", "contribution 2", ...],
@@ -188,25 +190,46 @@ Respond with ONLY valid JSON matching this schema exactly:
   "ablations": "Ablation study summary (empty string if none).",
   "limitations": ["limitation 1", "limitation 2", ...],
   "open_questions": ["question 1", "question 2", ...],
-  "reviewer_perspectives": [
-    {
-      "reviewer_id": "Reviewer 1",
-      "stance": "positive",
-      "key_points": ["point 1", "point 2"]
-    }
-  ],
-  "memory_connections": [
-    {
-      "session_id": "<session_id from history>",
-      "agent_type": "<diagnosis|research|reading>",
-      "connection_description": "Specific, concrete description of how this paper relates to that session.",
-      "related_input_summary": "<brief description of the related session>",
-      "relevance_score": 0.85
-    }
-  ]
-}
+  {reviewer_schema}
+  {memory_schema}
+}}
 
 Be specific and technical. Avoid vague statements."""
+
+_REVIEWER_SCHEMA_WITH_DATA = (
+    '"reviewer_perspectives": [\n'
+    '    {\n'
+    '      "reviewer_id": "Reviewer 1",\n'
+    '      "stance": "positive",\n'
+    '      "key_points": ["point 1", "point 2"]\n'
+    '    }\n'
+    '  ],'
+)
+
+_REVIEWER_SCHEMA_EMPTY = '"reviewer_perspectives": [],  // no reviewer data available — always return empty array'
+
+_MEMORY_SCHEMA_WITH_DATA = (
+    '"memory_connections": [\n'
+    '    {\n'
+    '      "session_id": "<exact session_id from the research history provided above>",\n'
+    '      "agent_type": "<diagnosis|research|reading>",\n'
+    '      "connection_description": "Specific, concrete description of how this paper relates to that session.",\n'
+    '      "related_input_summary": "<brief description of the related session>",\n'
+    '      "relevance_score": 0.85\n'
+    '    }\n'
+    '  ]'
+)
+
+_MEMORY_SCHEMA_EMPTY = '"memory_connections": []  // no research history provided — always return empty array'
+
+
+def _build_deep_read_system(has_reviews: bool, has_memory: bool) -> str:
+    reviewer_schema = _REVIEWER_SCHEMA_WITH_DATA if has_reviews else _REVIEWER_SCHEMA_EMPTY
+    memory_schema = _MEMORY_SCHEMA_WITH_DATA if has_memory else _MEMORY_SCHEMA_EMPTY
+    return _DEEP_READ_SYSTEM_BASE.format(
+        reviewer_schema=reviewer_schema,
+        memory_schema=memory_schema,
+    )
 
 
 def deep_read_node(state: ReadingState) -> dict[str, Any]:
@@ -216,7 +239,6 @@ def deep_read_node(state: ReadingState) -> dict[str, Any]:
     authors = ", ".join(state.paper_authors[:5]) if state.paper_authors else ""
 
     # Format reviews section
-    review_section = ""
     if state.paper_reviews:
         review_lines = []
         for i, rev in enumerate(state.paper_reviews[:6], 1):
@@ -230,11 +252,14 @@ def deep_read_node(state: ReadingState) -> dict[str, Any]:
                 f"Weaknesses: {weaknesses[:400]}"
             )
         review_section = "\n\n[Reviewer Perspectives]\n" + "\n---\n".join(review_lines)
+    else:
+        review_section = "\n\n[Reviewer Perspectives]: NOT AVAILABLE"
 
     # Format memory section
-    memory_section = ""
     if state.memory_context:
         memory_section = f"\n\n[Your Research History]\n{state.memory_context}"
+    else:
+        memory_section = "\n\n[Your Research History]: NOT AVAILABLE"
 
     user_content = (
         f"[Paper]\n"
@@ -246,9 +271,14 @@ def deep_read_node(state: ReadingState) -> dict[str, Any]:
         f"{memory_section}"
     )
 
+    system_prompt = _build_deep_read_system(
+        has_reviews=bool(state.paper_reviews),
+        has_memory=bool(state.memory_context),
+    )
+
     try:
         response = _llm.invoke([
-            SystemMessage(content=_DEEP_READ_SYSTEM),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=user_content),
         ])
         raw = response.content if isinstance(response.content, str) else str(response.content)

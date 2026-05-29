@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -11,7 +11,7 @@ from ..memory.episodic import EpisodicMemory
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="paperradar agent",
+        prog="peerlens agent",
         description="Run the research agent on a question.",
     )
     parser.add_argument("query", help="Research question or task")

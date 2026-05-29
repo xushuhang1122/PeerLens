@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-# PaperRadar MCP Server — one-click deploy (Ubuntu/Debian)
+﻿#!/usr/bin/env bash
+# PeerLens MCP Server — one-click deploy (Ubuntu/Debian)
 #
 # Usage:
 #   sudo EMBEDDING_API_KEY=sk-xxx bash server/deploy.sh
@@ -14,14 +14,14 @@
 #   DOMAIN              public domain name; omit to skip nginx
 #   ENABLE_HTTPS        set to 1 to run certbot (requires DOMAIN + DNS pointing here)
 #   MCP_PORT            default: 8765
-#   APP_USER            system user to run the service; default: paperradar
+#   APP_USER            system user to run the service; default: PeerLens
 #   INSTALL_DIR         project root; default: current directory
 set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 INSTALL_DIR="${INSTALL_DIR:-$(pwd)}"
 MCP_PORT="${MCP_PORT:-8765}"
-APP_USER="${APP_USER:-paperradar}"
+APP_USER="${APP_USER:-PeerLens}"
 DOMAIN="${DOMAIN:-}"
 ENABLE_HTTPS="${ENABLE_HTTPS:-0}"
 EMBEDDING_API_KEY="${EMBEDDING_API_KEY:-}"
@@ -86,12 +86,12 @@ else
 fi
 
 # ── systemd service ────────────────────────────────────────────────────────────
-SERVICE="paperradar-mcp"
+SERVICE="peerlens-mcp"
 SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
 info "Installing systemd service: $SERVICE_FILE"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=PaperRadar MCP Server
+Description=PeerLens MCP Server
 After=network.target
 
 [Service]
@@ -127,7 +127,7 @@ fi
 
 command -v nginx &>/dev/null || { info "Installing nginx ..."; apt-get install -y nginx; }
 
-NGINX_CONF="/etc/nginx/sites-available/paperradar-mcp"
+NGINX_CONF="/etc/nginx/sites-available/peerlens-mcp"
 info "Writing nginx config for $DOMAIN"
 cat > "$NGINX_CONF" <<EOF
 server {
@@ -148,7 +148,7 @@ server {
 }
 EOF
 
-ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/paperradar-mcp
+ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/peerlens-mcp
 nginx -t
 systemctl reload nginx
 

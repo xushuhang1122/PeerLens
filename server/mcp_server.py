@@ -1,4 +1,4 @@
-"""
+﻿"""
 PeerLens MCP Server — exposes read-only database tools over HTTP.
 
 Run on the cloud machine that hosts the pre-crawled ChromaDB + BM25 data:
@@ -20,7 +20,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastmcp import FastMCP
-from src.paperradar.agent.tools import (
+from src.peerlens.agent.tools import (
     search_papers,
     get_paper_reviews,
     cluster_reviews,

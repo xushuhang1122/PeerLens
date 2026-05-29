@@ -1,4 +1,4 @@
-import json
+﻿import json
 import datetime
 
 import streamlit as st
@@ -9,10 +9,10 @@ sys.path.insert(0, ".")
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from src.paperradar.config import settings
-from src.paperradar.agent.research_runner import stream_research_agent
-from src.paperradar.memory.episodic import EpisodicMemory
-from src.paperradar.schemas.survey import SurveyReport
+from src.peerlens.config import settings
+from src.peerlens.agent.research_runner import stream_research_agent
+from src.peerlens.memory.episodic import EpisodicMemory
+from src.peerlens.schemas.survey import SurveyReport
 
 # ------------------------------------------------------------------
 # LLM for clarification (stateless, cached)
@@ -140,8 +140,51 @@ def _force_extract_context() -> dict:
 # Survey rendering (reused across phases)
 # ------------------------------------------------------------------
 
+def _survey_to_markdown(survey: SurveyReport) -> str:
+    from datetime import datetime
+
+    lines: list[str] = []
+    lines += [f"# {survey.title}", ""]
+    lines += [f"_Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}_", ""]
+    if survey.used_training_data:
+        lines += [
+            "> **Warning:** No papers were found in the local database for this topic.",
+            "> Content is based on general knowledge and citations may not be accurate.",
+            "",
+        ]
+    if survey.background:
+        lines += ["## Background", "", survey.background, ""]
+    for sec in survey.sections:
+        lines += [f"## {sec.heading}", "", sec.content, ""]
+    if survey.open_questions:
+        lines += ["## Open Questions", ""]
+        for i, q in enumerate(survey.open_questions, 1):
+            lines.append(f"{i}. {q}")
+        lines.append("")
+    if survey.submission_advice:
+        lines += ["## Submission Advice", "", survey.submission_advice, ""]
+    if survey.key_papers:
+        lines += ["## Papers Referenced", ""]
+        for i, p in enumerate(survey.key_papers, 1):
+            link = f"[{p.title}]({p.forum_url})" if p.forum_url else p.title
+            area = f" · {p.primary_area}" if p.primary_area else ""
+            lines += [f"**[{i}]** {link} — {p.conference} {p.year} `{p.decision}`{area}"]
+            if p.abstract:
+                preview = p.abstract[:200] + ("..." if len(p.abstract) > 200 else "")
+                lines += [f"> {preview}"]
+            lines.append("")
+    return "\n".join(lines)
+
+
 def _render_survey(survey: SurveyReport) -> None:
     st.divider()
+    if survey.used_training_data:
+        st.warning(
+            "No papers were found in the local database for this topic. "
+            "The content below is based on general knowledge and may contain inaccurate citations. "
+            "Consider crawling relevant conferences first (Library page).",
+            icon="warning",
+        )
     st.subheader(survey.title)
     st.markdown(f"_{survey.background}_")
 
@@ -304,6 +347,13 @@ elif phase == "researching":
 
         if survey:
             st.session_state["research_survey"] = survey
+            safe_name = survey.title.replace(" ", "_")[:60]
+            st.download_button(
+                label="Download Survey (.md)",
+                data=_survey_to_markdown(survey).encode("utf-8"),
+                file_name=f"survey_{safe_name}.md",
+                mime="text/markdown",
+            )
             _render_survey(survey)
             summary_md = f"## {survey.title}\n{survey.background}"
         else:
@@ -335,4 +385,11 @@ elif phase == "done":
 
     survey = st.session_state.get("research_survey")
     if survey:
+        safe_name = survey.title.replace(" ", "_")[:60]
+        st.download_button(
+            label="Download Survey (.md)",
+            data=_survey_to_markdown(survey).encode("utf-8"),
+            file_name=f"survey_{safe_name}.md",
+            mime="text/markdown",
+        )
         _render_survey(survey)

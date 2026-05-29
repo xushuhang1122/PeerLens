@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 
 import sys
 sys.path.insert(0, ".")
@@ -7,13 +7,13 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 
-from src.paperradar.analysis.temporal import TemporalAnalyzer
-from src.paperradar.analysis.clustering import ReviewClusterer
-from src.paperradar.analysis.gap_detector import GapDetector
-from src.paperradar.schemas.tools import (
+from src.peerlens.analysis.temporal import TemporalAnalyzer
+from src.peerlens.analysis.clustering import ReviewClusterer
+from src.peerlens.analysis.gap_detector import GapDetector
+from src.peerlens.schemas.tools import (
     AnalyzeTemporalInput, ClusterReviewsInput, IdentifyGapsInput
 )
-from src.paperradar.config import settings
+from src.peerlens.config import settings
 
 @st.cache_resource
 def get_temporal():

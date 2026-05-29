@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from ..schemas.diagnosis import DiagnosisReport, DiagnosisState
 from .diagnosis_graph import get_diagnosis_graph
 
-_TIMEOUT_SECONDS = 300
+_TIMEOUT_SECONDS = 600
 _RECURSION_LIMIT = 45
 
 
@@ -48,6 +48,8 @@ def _invoke(paper_text: str, target_venue: str, memory_context: str | None = Non
         return graph.invoke(init, config={"recursion_limit": _RECURSION_LIMIT})
     except GraphRecursionError:
         return None
+    except Exception:
+        return None
 
 
 def run_diagnosis_agent(paper_text: str, target_venue: str = "") -> DiagnosisReport | None:
@@ -56,7 +58,7 @@ def run_diagnosis_agent(paper_text: str, target_venue: str = "") -> DiagnosisRep
         future = ex.submit(_invoke, paper_text, target_venue, memory_context)
         try:
             final = future.result(timeout=_TIMEOUT_SECONDS)
-        except concurrent.futures.TimeoutError:
+        except (concurrent.futures.TimeoutError, Exception):
             future.cancel()
             return None
     if final is None:

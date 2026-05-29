@@ -1,16 +1,16 @@
-import sys
+﻿import sys
 sys.path.insert(0, ".")
 
 import uuid
 import streamlit as st
 
-from src.paperradar.agent.reading_runner import (
+from src.peerlens.agent.reading_runner import (
     get_reading_report,
     resume_discussion,
     start_reading_agent,
 )
-from src.paperradar.memory.agent_memory import AgentMemoryManager
-from src.paperradar.schemas.reading import ReadingReport
+from src.peerlens.memory.agent_memory import AgentMemoryManager
+from src.peerlens.schemas.reading import ReadingReport
 
 st.set_page_config(page_title="Paper Reading Agent", page_icon="📖", layout="wide")
 st.title("Paper Reading Agent")
@@ -82,7 +82,7 @@ if not st.session_state.reading_started:
         uploaded = st.file_uploader("Upload your paper PDF", type="pdf", key="pdf_upload")
         if uploaded:
             pdf_bytes = uploaded.read()
-            from src.paperradar.utils.pdf_parser import extract_paper_text, extract_title_abstract
+            from src.peerlens.utils.pdf_parser import extract_paper_text, extract_title_abstract
             preview_text = extract_paper_text(pdf_bytes, max_words=500)
             meta = extract_title_abstract(preview_text)
             paper_title = meta.get("title", "")
@@ -124,9 +124,9 @@ if not st.session_state.reading_started:
         if find_btn and topic_query.strip():
             with st.spinner("Searching local database..."):
                 try:
-                    from src.paperradar.agent.tools import search_papers as _local_search
-                    from src.paperradar.agent.tools_remote import resolve_tool
-                    from src.paperradar.schemas.tools import SearchPapersOutput
+                    from src.peerlens.agent.tools import search_papers as _local_search
+                    from src.peerlens.agent.tools_remote import resolve_tool
+                    from src.peerlens.schemas.tools import SearchPapersOutput
                     _search = resolve_tool("search_papers", _local_search)
                     raw = _search.invoke({"query": topic_query.strip(), "top_k": 5})
                     results = SearchPapersOutput(**raw) if isinstance(raw, dict) else raw

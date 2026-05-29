@@ -1,14 +1,14 @@
-import streamlit as st
+﻿import streamlit as st
 
 import sys
 sys.path.insert(0, ".")
 
-from src.paperradar.retrieval.hybrid_search import HybridSearcher
-from src.paperradar.schemas.tools import SearchPapersInput
-from src.paperradar.config import settings
-from src.paperradar.memory.episodic import EpisodicMemory
-from src.paperradar.memory.semantic import SemanticMemory
-from src.paperradar.schemas.paper import Paper
+from src.peerlens.retrieval.hybrid_search import HybridSearcher
+from src.peerlens.schemas.tools import SearchPapersInput
+from src.peerlens.config import settings
+from src.peerlens.memory.episodic import EpisodicMemory
+from src.peerlens.memory.semantic import SemanticMemory
+from src.peerlens.schemas.paper import Paper
 
 _DECISION_COLORS = {
     "oral":      "#e74c3c",

@@ -24,6 +24,7 @@ class SurveyReport(BaseModel):
     sections: list[SurveySection] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     submission_advice: str = ""
+    used_training_data: bool = False
     generated_at: datetime = Field(default_factory=datetime.utcnow)
 
 

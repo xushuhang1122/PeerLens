@@ -17,7 +17,7 @@ class OpenReviewConfig:
     single_sleep: float = 0.5
     async_concurrency: int = 10
     max_retries: int = 3
-    user_agent: str = "Mozilla/5.0 (compatible; PaperRadar/1.0)"
+    user_agent: str = "Mozilla/5.0 (compatible; PeerLens/1.0)"
 
 
 @dataclass
@@ -33,6 +33,7 @@ class ConferenceConfig:
                 "oral":      "NeurIPS {year} oral",
                 "spotlight": "NeurIPS {year} spotlight",
                 "poster":    "NeurIPS {year} poster",
+                "rejected":  "Submitted to NeurIPS {year}",
             },
         },
         "ICML": {
@@ -45,7 +46,7 @@ class ConferenceConfig:
                 "oral":      "ICLR {year} oral",
                 "spotlight": "ICLR {year} notable top 5%",
                 "poster":    "ICLR {year} poster",
-                "rejected":  "ICLR {year} rejected",
+                "rejected":  "Submitted to ICLR {year}",
             },
         },
         # --- Other strong ML/AI venues on OpenReview ---

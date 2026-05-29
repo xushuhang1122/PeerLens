@@ -18,3 +18,4 @@ Thumbs.db
 chroma_db/
 bm25_index/
 *.log
+*.pdf

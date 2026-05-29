@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -9,7 +9,7 @@ from ..schemas.tools import SearchPapersInput
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="paperradar search",
+        prog="peerlens search",
         description="Search papers in the local database using hybrid retrieval.",
     )
     parser.add_argument("query", help="Search query")

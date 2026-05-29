@@ -12,6 +12,7 @@
 | 🔍 **Hybrid Search** | BM25 + dual-vector semantic search across paper content *and* reviewer comments, fused via RRF. Filter by decision, conference, and year. |
 | 📝 **Research Agent** | Describe a topic in natural language → structured literature survey with citations, temporal trends, and submission advice. |
 | 🩺 **Diagnosis Agent** | Upload your PDF → simulated peer review (overall + soundness/presentation/contribution scores) + prioritized suggestions each matched to a real reviewer comment. |
+| 📖 **Reading Agent** *(experimental)* | Deep-read any paper via PDF, OpenReview URL, ArXiv URL, or topic search. Generates a structured report (TL;DR, contributions, methodology, reviewer perspectives) and supports multi-turn academic discussion. |
 | 📚 **Library** | Crawl any OpenReview venue, re-fetch reviews, and browse database stats. |
 | 🧠 **Memory** | Episodic query history + semantic preference vectors. Surface newly crawled papers that match your interests. |
 
@@ -67,6 +68,36 @@ python main.py search "efficient attention mechanisms" --decision oral spotlight
 
 ---
 
+## 🔌 Remote MCP Mode *(experimental)*
+
+PeerLens can connect to a shared remote database instead of a local one, via a self-hosted MCP server.
+
+**Server setup** (on a machine with pre-crawled data):
+
+```bash
+# Install deps and start the MCP server
+pip install -r requirements.txt
+python server/mcp_server.py          # listens on 0.0.0.0:8765 by default
+```
+
+For a production deployment with systemd + optional nginx/HTTPS:
+
+```bash
+sudo EMBEDDING_API_KEY=sk-... bash server/deploy.sh
+# With domain + HTTPS:
+sudo EMBEDDING_API_KEY=sk-... DOMAIN=mcp.example.com ENABLE_HTTPS=1 bash server/deploy.sh
+```
+
+**Client config** — add one line to your `.env`:
+
+```env
+REMOTE_MCP_URL=http://<server-ip>:8765/mcp
+```
+
+When `REMOTE_MCP_URL` is set, all agent search calls are routed to the remote server. The local ChromaDB and BM25 index are not required.
+
+---
+
 ## 🏗️ Architecture
 
 ```
@@ -89,6 +120,13 @@ HybridSearcher
   retrieve (hybrid search)           search  (accepted + rejected)
   analyze  (temporal trends)         review_analysis (K-Means clusters)
   synthesize_survey (LLM)            diagnose (SimulatedReview + suggestions)
+
+📖 Reading Agent (LangGraph)
+  parse_input (PDF / URL / topic)
+  fetch_openreview / fetch_arxiv
+  inject_reviews (local DB lookup)
+  deep_read (structured report + reviewer perspectives)
+  discussion (multi-turn chat)
 ```
 
 ---
@@ -96,24 +134,25 @@ HybridSearcher
 ## 📁 Project Structure
 
 ```
-src/paperradar/
+src/peerlens/
 ├── config.py              # All settings, loaded from .env
-├── schemas/               # Pydantic v2: papers, tools, agent states, survey, diagnosis
+├── schemas/               # Pydantic v2: papers, tools, agent states, survey, diagnosis, reading
 ├── crawl/                 # OpenReview crawler, async review fetcher, crawl pipeline
 ├── store/                 # ChromaDB (singleton), BM25 (singleton), SQLite episodic store
 ├── retrieval/             # Embedder, hybrid search, RRF fusion
 ├── analysis/              # Temporal trends, K-Means clustering, gap detection
 ├── memory/                # Episodic memory, semantic preferences, push engine
-└── agent/                 # LangGraph graphs + runners (research, diagnosis)
+└── agent/                 # LangGraph graphs + runners (research, diagnosis, reading)
 
 pages/
 ├── home.py                # Home + onboarding wizard
-├── 2_Agent.py             # Research Agent
-├── 6_Diagnose.py          # Diagnosis Agent
 ├── 1_Search.py            # Hybrid paper search
+├── 2_Agent.py             # Research Agent
 ├── 3_Analysis.py          # Trends + clustering
 ├── 4_Library.py           # Crawl management + database stats
-└── 5_Memory.py            # Query history + push recommendations
+├── 5_Memory.py            # Query history + push recommendations
+├── 6_Diagnose.py          # Diagnosis Agent
+└── 7_Reading.py           # Reading Agent + multi-turn discussion
 ```
 
 ---
@@ -128,6 +167,7 @@ pages/
 | `EMBEDDING_API_KEY` | No | = `LLM_API_KEY` | Embedding API key |
 | `EMBEDDING_BASE_URL` | No | OpenAI | Embedding endpoint base URL |
 | `EMBEDDING_MODEL` | No | `text-embedding-3-large` | Embedding model |
+| `REMOTE_MCP_URL` | No | — | MCP server endpoint (e.g. `http://host:8765/mcp`). When set, agent search uses the remote database instead of local. |
 
 ---
 

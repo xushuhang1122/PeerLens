@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import sys
@@ -9,7 +9,7 @@ from ..crawl.pipeline import CrawlPipeline
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="paperradar crawl",
+        prog="peerlens crawl",
         description="Crawl and index papers from OpenReview into the local database.",
     )
     parser.add_argument(

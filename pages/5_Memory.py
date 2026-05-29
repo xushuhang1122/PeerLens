@@ -1,11 +1,11 @@
-import streamlit as st
+﻿import streamlit as st
 
 import sys
 sys.path.insert(0, ".")
 
-from src.paperradar.memory.episodic import EpisodicMemory
-from src.paperradar.memory.semantic import SemanticMemory
-from src.paperradar.memory.push_engine import PushEngine
+from src.peerlens.memory.episodic import EpisodicMemory
+from src.peerlens.memory.semantic import SemanticMemory
+from src.peerlens.memory.push_engine import PushEngine
 
 @st.cache_resource
 def get_episodic():
@@ -50,7 +50,7 @@ with tab_prefs:
     try:
         liked_ids = get_episodic().get_liked_paper_ids(50)
         if liked_ids:
-            from src.paperradar.store.chroma import ChromaManager
+            from src.peerlens.store.chroma import ChromaManager
             chroma = ChromaManager()  # returns singleton
             data = chroma.get_content_by_ids(liked_ids)
             ids = data.get("ids") or []

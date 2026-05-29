@@ -1,5 +1,5 @@
-import streamlit as st
-from src.paperradar.config import settings
+﻿import streamlit as st
+from src.peerlens.config import settings
 
 st.set_page_config(
     page_title="PeerLens",
