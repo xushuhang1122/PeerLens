@@ -84,12 +84,13 @@ def _report_to_markdown(report, paper_title: str = "") -> str:
     quick_fixes = [f for f in report.findings if f.repair_cost == "one_day_revision"]
     if quick_fixes:
         lines += ["## Specific Suggestions", ""]
-        evidence_map = {u.finding_id: u for u in report.evidence_updates}
+        lines += ["_Concrete steps for tomorrow — each tied to a specific section, paragraph, or table._", ""]
         for f in quick_fixes:
-            lines.append(f"**{f.id}:** {f.problem}")
-            ev = evidence_map.get(f.id)
-            if ev and ev.verdict == "confirmed" and ev.evidence_quote:
-                lines.append(f"> {ev.evidence_quote}")
+            lines.append(f"**{f.id}** — {f.problem}")
+            steps = getattr(f, "action_steps", [])
+            if steps:
+                for i, step in enumerate(steps, 1):
+                    lines.append(f"{i}. {step}")
             lines.append("")
 
     # 4. Writing Issues
@@ -138,6 +139,15 @@ def _render_report(report) -> None:
         st.subheader("Priority Fix List")
         evidence_map = {u.finding_id: u for u in report.evidence_updates}
 
+        primary = next((f for f in report.findings if getattr(f, "is_primary", False)), None)
+        if primary:
+            repair_label = _REPAIR_LABEL.get(primary.repair_cost, primary.repair_cost)
+            nature_label = _NATURE_LABEL.get(primary.nature, primary.nature)
+            st.error(
+                f"**Primary concern — {primary.id} [{repair_label} / {nature_label}]**\n\n"
+                f"{primary.problem}"
+            )
+
         repair_groups: dict[str, list] = {}
         for f in _sort_findings(report.findings):
             repair_groups.setdefault(f.repair_cost, []).append(f)
@@ -171,18 +181,24 @@ def _render_report(report) -> None:
                         with st.expander(f"Evidence ({ev.verdict})"):
                             st.markdown(f"> {ev.evidence_quote}")
 
-    # 3. Specific Suggestions (one_day_revision)
+    # 3. Specific Suggestions (one_day_revision only — concrete action steps)
     quick_fixes = [f for f in report.findings if f.repair_cost == "one_day_revision"]
     if quick_fixes:
         st.divider()
         st.subheader("Specific Suggestions")
-        evidence_map = {u.finding_id: u for u in report.evidence_updates}
+        st.caption("Concrete steps for tomorrow — each tied to a specific section, paragraph, or table.")
         for f in quick_fixes:
-            ev = evidence_map.get(f.id)
+            steps = getattr(f, "action_steps", [])
             with st.container(border=True):
-                st.markdown(f"**{f.id}:** {f.problem}")
-                if ev and ev.verdict == "confirmed" and ev.evidence_quote:
-                    st.markdown(f"> {ev.evidence_quote}")
+                nature_label = _NATURE_LABEL.get(f.nature, f.nature)
+                nature_color = _NATURE_COLOR.get(f.nature, "gray")
+                st.markdown(f"**{f.id}** — :{nature_color}[{nature_label}]")
+                st.markdown(f"*{f.problem}*")
+                if steps:
+                    for i, step in enumerate(steps, 1):
+                        st.markdown(f"{i}. {step}")
+                else:
+                    st.caption("No specific steps generated for this finding.")
 
     # 4. Writing Issues
     if report.writing_issues:
@@ -268,78 +284,180 @@ if existing_report:
 
 else:
     # ------------------------------------------------------------------
-    # Upload form
+    # Helper functions for DB pre-check
     # ------------------------------------------------------------------
-    uploaded = st.file_uploader("Upload paper (PDF)", type=["pdf"])
 
-    if uploaded is not None:
-        pdf_bytes = uploaded.read()
-        with st.spinner("Extracting text..."):
-            paper_text = extract_full_paper_text(pdf_bytes)
-            meta = extract_title_abstract(paper_text)
+    def _check_remote(url: str) -> tuple[bool, int, str]:
+        """Returns (ok, paper_count, error_msg)."""
+        try:
+            from src.peerlens.agent.tools_remote import _call_mcp_tool
+            result = _call_mcp_tool(url, "search_papers", {"query": "machine learning", "top_k": 1})
+            count = result.get("total_found", len(result.get("results", [])))
+            return True, count, ""
+        except Exception as e:
+            return False, 0, str(e)
 
-        col1, col2 = st.columns([3, 1])
+    def _check_local() -> int:
+        """Returns local paper count."""
+        try:
+            from src.peerlens.store.chroma import ChromaManager
+            return ChromaManager()._content.count()
+        except Exception:
+            return 0
+
+    def _reset_diag_state():
+        for k in ("diag_stage", "diag_force_local", "diag_check_error",
+                  "diag_paper_text", "diag_venue", "diagnosis_running"):
+            st.session_state.pop(k, None)
+
+    def _run_pipeline():
+        paper_text = st.session_state["diag_paper_text"]
+        venue = st.session_state.get("diag_venue", "")
+        with st.status("Running diagnosis...", expanded=True) as status:
+            try:
+                final_report = None
+                for event in stream_diagnosis_agent(paper_text, venue):
+                    if isinstance(event, dict) and "error" in event:
+                        st.warning(f"Agent stopped: {event['error']}")
+                        break
+                    if not isinstance(event, dict):
+                        continue
+                    msgs = event.get("messages", [])
+                    if msgs:
+                        last = msgs[-1]
+                        if (getattr(last, "type", "") == "ai"
+                                and isinstance(getattr(last, "content", ""), str)
+                                and last.content.strip()):
+                            st.write(last.content)
+                    report = event.get("report")
+                    if report:
+                        final_report = report
+                status.update(label="Done", state="complete")
+                st.session_state["diagnosis_report"] = final_report
+            except Exception as e:
+                status.update(label="Error", state="error")
+                st.error(str(e))
+        st.session_state.pop("diag_force_local", None)
+        st.session_state["diag_stage"] = None
+        st.session_state["diagnosis_running"] = False
+        st.rerun()
+
+    # ------------------------------------------------------------------
+    # Pre-check state machine
+    # ------------------------------------------------------------------
+
+    stage = st.session_state.get("diag_stage")
+
+    # Stage: run connectivity check
+    if stage == "check":
+        remote_url = st.session_state.get("remote_mcp_url")
+        if remote_url:
+            with st.spinner("Checking remote database..."):
+                ok, count, err = _check_remote(remote_url)
+            if ok and count > 0:
+                st.session_state["diag_force_local"] = False
+                st.session_state["diag_stage"] = "running"
+                st.rerun()
+            else:
+                msg = err if err else f"Remote returned 0 papers."
+                st.session_state["diag_check_error"] = msg
+                st.session_state["diag_stage"] = "confirm_local"
+                st.rerun()
+        else:
+            local_count = _check_local()
+            if local_count > 0:
+                st.session_state["diag_force_local"] = False
+                st.session_state["diag_stage"] = "running"
+                st.rerun()
+            else:
+                st.session_state["diag_stage"] = "confirm_skip"
+                st.rerun()
+
+    # Stage: remote failed — ask whether to use local
+    elif stage == "confirm_local":
+        err = st.session_state.get("diag_check_error", "")
+        st.warning(f"Remote database unavailable: {err}")
+        st.markdown("Switch to the **local database** to continue?")
+        col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"**Detected title:** {meta['title']}")
+            if st.button("Use local database", type="primary"):
+                local_count = _check_local()
+                if local_count > 0:
+                    st.session_state["diag_force_local"] = True
+                    st.session_state["diag_stage"] = "running"
+                else:
+                    st.session_state["diag_force_local"] = True
+                    st.session_state["diag_stage"] = "confirm_skip"
+                st.rerun()
         with col2:
-            st.caption(f"{len(paper_text.split())} words extracted")
+            if st.button("Cancel"):
+                _reset_diag_state()
+                st.rerun()
 
-        with st.expander("Abstract preview"):
-            st.write(meta["abstract"] or paper_text[:500])
-
-        st.divider()
-
-        target_venue = st.selectbox(
-            "Target venue (optional)",
-            options=[""] + _KNOWN_VENUES,
-            format_func=lambda x: "Not specified (general review)" if x == "" else x,
-            help="Select or type a venue to get feedback tailored to that conference's review criteria.",
+    # Stage: local (or remote) has 0 papers — ask whether to proceed anyway
+    elif stage == "confirm_skip":
+        st.warning(
+            "The database contains no papers for this query. "
+            "The diagnosis will proceed without similar paper comparisons — "
+            "the findings will be based solely on the paper's own content. "
+            "Quality may be reduced."
         )
-        custom_venue = st.text_input(
-            "Or enter a custom venue",
-            placeholder="e.g. COLM 2026, TMLR, CoRL 2026",
-        )
-        effective_venue = custom_venue.strip() if custom_venue.strip() else target_venue
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Proceed without similar papers", type="primary"):
+                st.session_state["diag_stage"] = "running"
+                st.rerun()
+        with col2:
+            if st.button("Cancel"):
+                _reset_diag_state()
+                st.rerun()
 
-        if "diagnosis_running" not in st.session_state:
-            st.session_state.diagnosis_running = False
+    # Stage: all checks passed — run pipeline
+    elif stage == "running":
+        st.session_state["diagnosis_running"] = True
+        _run_pipeline()
 
-        if st.button("Run Diagnosis", type="primary", disabled=st.session_state.diagnosis_running):
-            st.session_state.diagnosis_running = True
-            st.session_state["diagnosis_meta"] = meta
+    # ------------------------------------------------------------------
+    # Upload form (shown when no active stage)
+    # ------------------------------------------------------------------
+    elif stage is None:
+        uploaded = st.file_uploader("Upload paper (PDF)", type=["pdf"])
 
-            with st.status("Running diagnosis...", expanded=True) as status:
-                try:
-                    final_report = None
+        if uploaded is not None:
+            pdf_bytes = uploaded.read()
+            with st.spinner("Extracting text..."):
+                paper_text = extract_full_paper_text(pdf_bytes)
+                meta = extract_title_abstract(paper_text)
 
-                    for event in stream_diagnosis_agent(paper_text, effective_venue):
-                        if isinstance(event, dict) and "error" in event:
-                            st.warning(f"Agent stopped: {event['error']}")
-                            break
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"**Detected title:** {meta['title']}")
+            with col2:
+                st.caption(f"{len(paper_text.split())} words extracted")
 
-                        if not isinstance(event, dict):
-                            continue
+            with st.expander("Abstract preview"):
+                st.write(meta["abstract"] or paper_text[:500])
 
-                        msgs = event.get("messages", [])
-                        if msgs:
-                            last = msgs[-1]
-                            role = getattr(last, "type", "")
-                            content = getattr(last, "content", "")
-                            if role == "ai" and content and isinstance(content, str) and content.strip():
-                                st.write(content)
+            st.divider()
 
-                        report = event.get("report")
-                        if report:
-                            final_report = report
+            target_venue = st.selectbox(
+                "Target venue (optional)",
+                options=[""] + _KNOWN_VENUES,
+                format_func=lambda x: "Not specified (general review)" if x == "" else x,
+                help="Select or type a venue to get feedback tailored to that conference's review criteria.",
+            )
+            custom_venue = st.text_input(
+                "Or enter a custom venue",
+                placeholder="e.g. COLM 2026, TMLR, CoRL 2026",
+            )
+            effective_venue = custom_venue.strip() if custom_venue.strip() else target_venue
 
-                    status.update(label="Done", state="complete")
-                    st.session_state.diagnosis_report = final_report
-                except Exception as e:
-                    status.update(label="Error", state="error")
-                    st.error(str(e))
+            if st.button("Run Diagnosis", type="primary"):
+                st.session_state["diagnosis_meta"] = meta
+                st.session_state["diag_paper_text"] = paper_text
+                st.session_state["diag_venue"] = effective_venue
+                st.session_state["diag_stage"] = "check"
+                st.rerun()
 
-            st.session_state.diagnosis_running = False
-            st.rerun()
-
-    else:
-        st.info("Upload a PDF above to start the diagnosis.")
+        else:
+            st.info("Upload a PDF above to start the diagnosis.")

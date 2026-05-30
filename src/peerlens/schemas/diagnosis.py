@@ -41,6 +41,8 @@ class Finding(BaseModel):
     repair_cost: str  # "one_day_revision" | "needs_experiment" | "needs_redesign"
     confidence: str   # "high" | "medium" | "low"
     confidence_reason: str = ""
+    is_primary: bool = False
+    action_steps: list[str] = Field(default_factory=list)  # populated for one_day_revision only
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +99,8 @@ class DiagnosisState(BaseModel):
     similar_rejected: list[PaperResult] = Field(default_factory=list)
     review_patterns: Optional[object] = None
     retrieved_reviews: Optional[dict] = None
+    accepted_review_excerpts: list[str] = Field(default_factory=list)
+    rejected_review_excerpts: list[str] = Field(default_factory=list)
     # Stage 2 outputs
     findings: list[Finding] = Field(default_factory=list)
     executive_summary: str = ""

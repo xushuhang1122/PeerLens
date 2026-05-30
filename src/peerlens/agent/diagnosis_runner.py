@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+from datetime import datetime
 from typing import Generator
 
 from langchain_core.messages import HumanMessage
@@ -71,6 +72,10 @@ def run_diagnosis_agent(paper_text: str, target_venue: str = "") -> DiagnosisRep
 
 def stream_diagnosis_agent(paper_text: str, target_venue: str = "") -> Generator[dict, None, None]:
     from langgraph.errors import GraphRecursionError
+    from .diagnosis_graph import init_run_logger
+
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    init_run_logger(run_id)
 
     memory_context = _get_memory_context(paper_text)
     graph = get_diagnosis_graph()

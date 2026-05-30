@@ -93,9 +93,8 @@ def preprocess_paper_text(text: str, context_limit: int = 120_000) -> dict:
 
 _BODY_END_PATTERNS = [
     re.compile(r"^\s*(Appendix|APPENDIX)\b", re.MULTILINE),
-    re.compile(r"^\s*A\.\s+[A-Z]", re.MULTILINE),
     re.compile(r"^\s*(References|REFERENCES|Bibliography|BIBLIOGRAPHY)\s*$", re.MULTILINE),
-    re.compile(r"^\s*Acknowledgements?\b", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^\s*Acknowledgements?\s*$", re.MULTILINE | re.IGNORECASE),
 ]
 
 
@@ -113,12 +112,54 @@ def extract_body_text(text: str, max_words: int = 10_000) -> str:
     return body.strip()
 
 
+def _table_to_markdown(table: list) -> str:
+    if not table:
+        return ""
+    rows = []
+    for i, row in enumerate(table):
+        cells = [str(cell or "").replace("\n", " ").strip() for cell in row]
+        rows.append("| " + " | ".join(cells) + " |")
+        if i == 0:
+            rows.append("|" + "|".join(["---"] * len(cells)) + "|")
+    return "\n".join(rows)
+
+
+def _extract_tables_markdown(pdf_bytes: bytes) -> str:
+    """Use pdfplumber to extract tables and return them as numbered markdown blocks."""
+    try:
+        import pdfplumber
+        sections: list[str] = []
+        table_count = 0
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page_num, page in enumerate(pdf.pages, start=1):
+                tables = page.extract_tables()
+                for table in tables:
+                    if not table or all(
+                        all(cell is None or str(cell).strip() == "" for cell in row)
+                        for row in table
+                    ):
+                        continue
+                    table_count += 1
+                    md = _table_to_markdown(table)
+                    if md:
+                        sections.append(f"### Table {table_count} (page {page_num})\n\n{md}")
+        return "\n\n".join(sections)
+    except Exception:
+        return ""
+
+
 def extract_full_paper_text(pdf_bytes: bytes) -> str:
-    """Extract full paper body (all pages, strip appendix/references, no word cap)."""
+    """Extract full paper body via pypdf, then append tables from pdfplumber."""
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(pdf_bytes))
     raw = "\n".join(page.extract_text() or "" for page in reader.pages)
-    return extract_body_text(raw, max_words=100_000)
+    body = extract_body_text(raw, max_words=100_000)
+
+    tables_md = _extract_tables_markdown(pdf_bytes)
+    if tables_md:
+        body += "\n\n---\n## Extracted Tables\n\n" + tables_md
+
+    return body
 
 
 # ---------------------------------------------------------------------------

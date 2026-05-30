@@ -21,10 +21,13 @@ def _active_url() -> str | None:
     """Return the MCP URL for this request.
 
     Priority: Streamlit session_state (per-user toggle) > env var (default).
+    diag_force_local overrides to None for the duration of a single diagnosis run.
     Falls back gracefully when called outside a Streamlit context.
     """
     try:
         import streamlit as st
+        if st.session_state.get("diag_force_local"):
+            return None
         return st.session_state.get("remote_mcp_url", settings.remote_mcp.url)
     except Exception:
         return settings.remote_mcp.url
