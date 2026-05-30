@@ -11,7 +11,7 @@
 |---|---|
 | 🔍 **Hybrid Search** | BM25 + dual-vector semantic search across paper content *and* reviewer comments, fused via RRF. Filter by decision, conference, and year. |
 | 📝 **Research Agent** | Describe a topic in natural language → structured literature survey with citations, temporal trends, and submission advice. |
-| 🩺 **Diagnosis Agent** | Upload your PDF → simulated peer review (overall + soundness/presentation/contribution scores) + prioritized suggestions each matched to a real reviewer comment. |
+| 🩺 **Diagnosis Agent** | Upload your PDF → structured findings ranked by repair cost (revision / experiment / redesign), with concrete action steps for each quick fix, grounded in real reviewer patterns from the database. |
 | 📖 **Reading Agent** *(experimental)* | Deep-read any paper via PDF, OpenReview URL, ArXiv URL, or topic search. Generates a structured report (TL;DR, contributions, methodology, reviewer perspectives) and supports multi-turn academic discussion. |
 | 📚 **Library** | Crawl any OpenReview venue, re-fetch reviews, and browse database stats. |
 | 🧠 **Memory** | Episodic query history + semantic preference vectors. Surface newly crawled papers that match your interests. |
@@ -20,10 +20,11 @@
 
 ## 🏛️ Supported Venues
 
-**NeurIPS · ICML · ICLR · AISTATS · UAI · CoRL · COLM · RLC**
+**NeurIPS · ICML · ICLR**
 
-All publish submissions and open peer reviews on OpenReview — no authentication required.
-Any other OpenReview venue can be discovered and indexed via the Library page.
+The current shared database covers these three top ML conferences (2023–2025), including both accepted papers and public rejected submissions from ICLR, totalling ~25,000 papers with full reviewer comments.
+
+Other OpenReview venues (AISTATS, UAI, CoRL, COLM, RLC, etc.) can be discovered and indexed locally via the Library page.
 
 ---
 
@@ -70,12 +71,17 @@ python main.py search "efficient attention mechanisms" --decision oral spotlight
 
 ## 🔌 Remote MCP Mode *(experimental)*
 
-PeerLens can connect to a shared remote database instead of a local one, via a self-hosted MCP server.
+PeerLens can connect to a shared remote database instead of building one locally. A public server is available for immediate use:
 
-**Server setup** (on a machine with pre-crawled data):
+```env
+REMOTE_MCP_URL=http://43.134.60.58:8765/mcp
+```
+
+Add this line to your `.env` (or toggle it in the sidebar), and all agent search calls are routed to the shared server — no local crawling or embedding required. The shared database currently covers NeurIPS / ICML / ICLR 2023–2025 (~25,000 papers).
+
+**Self-hosting** (on a machine with pre-crawled data):
 
 ```bash
-# Install deps and start the MCP server
 pip install -r requirements.txt
 python server/mcp_server.py          # listens on 0.0.0.0:8765 by default
 ```
@@ -87,14 +93,6 @@ sudo EMBEDDING_API_KEY=sk-... bash server/deploy.sh
 # With domain + HTTPS:
 sudo EMBEDDING_API_KEY=sk-... DOMAIN=mcp.example.com ENABLE_HTTPS=1 bash server/deploy.sh
 ```
-
-**Client config** — add one line to your `.env`:
-
-```env
-REMOTE_MCP_URL=http://<server-ip>:8765/mcp
-```
-
-When `REMOTE_MCP_URL` is set, all agent search calls are routed to the remote server. The local ChromaDB and BM25 index are not required.
 
 ---
 
