@@ -121,6 +121,6 @@ def get_remote_tool(name: str) -> Any:
 
 
 def resolve_tool(name: str, local_tool: Any) -> Any:
-    if is_remote_mode():
+    if is_remote_mode() and name in _REMOTE_TOOL_NAMES:
         return get_remote_tool(name)
     return local_tool

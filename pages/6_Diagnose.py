@@ -313,12 +313,15 @@ else:
     def _run_pipeline():
         paper_text = st.session_state["diag_paper_text"]
         venue = st.session_state.get("diag_venue", "")
+        error_msg: str = ""
         with st.status("Running diagnosis...", expanded=True) as status:
             try:
                 final_report = None
-                for event in stream_diagnosis_agent(paper_text, venue):
+                meta = st.session_state.get("diagnosis_meta", {})
+                for event in stream_diagnosis_agent(paper_text, venue, paper_title=meta.get("title", "")):
                     if isinstance(event, dict) and "error" in event:
-                        st.warning(f"Agent stopped: {event['error']}")
+                        error_msg = event["error"]
+                        st.warning(f"Agent stopped: {error_msg}")
                         break
                     if not isinstance(event, dict):
                         continue
@@ -332,14 +335,18 @@ else:
                     report = event.get("report")
                     if report:
                         final_report = report
-                status.update(label="Done", state="complete")
+                status.update(label="Done" if final_report else "No report generated", state="complete")
                 st.session_state["diagnosis_report"] = final_report
             except Exception as e:
+                import traceback
+                error_msg = traceback.format_exc()
                 status.update(label="Error", state="error")
                 st.error(str(e))
         st.session_state.pop("diag_force_local", None)
         st.session_state["diag_stage"] = None
         st.session_state["diagnosis_running"] = False
+        if error_msg:
+            st.session_state["diag_last_error"] = error_msg
         st.rerun()
 
     # ------------------------------------------------------------------
@@ -433,6 +440,10 @@ else:
     # Upload form (shown when no active stage)
     # ------------------------------------------------------------------
     elif stage is None:
+        if "diag_last_error" in st.session_state:
+            with st.expander("Last run failed — error details", expanded=True):
+                st.code(st.session_state.pop("diag_last_error"), language="python")
+
         uploaded = st.file_uploader("Upload paper (PDF)", type=["pdf"])
 
         if uploaded is not None:

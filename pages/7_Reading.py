@@ -215,6 +215,11 @@ if not st.session_state.reading_started:
                 or (st.session_state.selected_paper.title if st.session_state.selected_paper else "")
             )
             _save_reading_session(input_text, st.session_state.reading_report)
+            try:
+                from src.peerlens.utils.report_saver import save_reading_report
+                save_reading_report(st.session_state.reading_report, source=url or paper_title)
+            except Exception:
+                pass
 
         st.rerun()
 

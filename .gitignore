@@ -19,3 +19,5 @@ chroma_db/
 bm25_index/
 *.log
 *.pdf
+logs/
+reports/

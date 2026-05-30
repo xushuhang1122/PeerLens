@@ -24,11 +24,16 @@ def _get_memory_context(query_text: str) -> str | None:
 
 
 def _save_session_async(query_text: str, report: SurveyReport) -> None:
-    """Async fire-and-forget: compress and persist session to memory store."""
+    """Async fire-and-forget: persist session to memory store and save report to disk."""
     def _save():
         try:
             from ..memory.agent_memory import AgentMemoryManager
             AgentMemoryManager().save_session("research", query_text, report)
+        except Exception:
+            pass
+        try:
+            from ..utils.report_saver import save_survey_report
+            save_survey_report(report, query_text)
         except Exception:
             pass
     concurrent.futures.ThreadPoolExecutor(max_workers=1).submit(_save)

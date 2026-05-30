@@ -1,5 +1,7 @@
 # 🔬 PeerLens
 
+![PeerLens banner](assets/banner.png)
+
 > A local AI research assistant powered by real peer review data from OpenReview.
 > Search ML papers by reviewer signal, generate literature surveys, and get venue-calibrated diagnosis for your own paper.
 
@@ -78,6 +80,8 @@ REMOTE_MCP_URL=http://43.134.60.58:8765/mcp
 ```
 
 Add this line to your `.env` (or toggle it in the sidebar), and all agent search calls are routed to the shared server — no local crawling or embedding required. The shared database currently covers NeurIPS / ICML / ICLR 2023–2025 (~25,000 papers).
+
+> **If the shared server is unavailable or slow:** The public server is a single-machine deployment and may occasionally be unreachable or under heavy load. If you hit connection errors or long waits, simply remove `REMOTE_MCP_URL` from your `.env` (or toggle off in the sidebar) and fall back to a local database. Use the **Library** page to crawl any venue you need, or see the CLI examples in Setup step 4. A local database for one conference + year takes ~10–30 minutes to build and requires no server.
 
 **Self-hosting** (on a machine with pre-crawled data):
 

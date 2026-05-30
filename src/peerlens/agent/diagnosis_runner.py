@@ -24,12 +24,17 @@ def _get_memory_context(paper_text: str) -> str | None:
         return None
 
 
-def _save_session_async(paper_text: str, report: DiagnosisReport) -> None:
-    """Async fire-and-forget: compress and persist session to memory store."""
+def _save_session_async(paper_text: str, report: DiagnosisReport, paper_title: str = "") -> None:
+    """Async fire-and-forget: persist session to memory store and save report to disk."""
     def _save():
         try:
             from ..memory.agent_memory import AgentMemoryManager
             AgentMemoryManager().save_session("diagnosis", paper_text, report)
+        except Exception:
+            pass
+        try:
+            from ..utils.report_saver import save_diagnosis_report
+            save_diagnosis_report(report, paper_title)
         except Exception:
             pass
     concurrent.futures.ThreadPoolExecutor(max_workers=1).submit(_save)
@@ -70,7 +75,7 @@ def run_diagnosis_agent(paper_text: str, target_venue: str = "") -> DiagnosisRep
     return report
 
 
-def stream_diagnosis_agent(paper_text: str, target_venue: str = "") -> Generator[dict, None, None]:
+def stream_diagnosis_agent(paper_text: str, target_venue: str = "", paper_title: str = "") -> Generator[dict, None, None]:
     from langgraph.errors import GraphRecursionError
     from .diagnosis_graph import init_run_logger
 
@@ -97,4 +102,4 @@ def stream_diagnosis_agent(paper_text: str, target_venue: str = "") -> Generator
     except Exception as e:
         yield {"error": str(e)}
     if final_report:
-        _save_session_async(paper_text, final_report)
+        _save_session_async(paper_text, final_report, paper_title)
