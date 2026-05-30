@@ -307,7 +307,7 @@ else:
 
     def _reset_diag_state():
         for k in ("diag_stage", "diag_force_local", "diag_check_error",
-                  "diag_paper_text", "diag_venue", "diagnosis_running"):
+                  "diag_check_attempt", "diag_paper_text", "diag_venue", "diagnosis_running"):
             st.session_state.pop(k, None)
 
     def _run_pipeline():
@@ -348,19 +348,31 @@ else:
 
     stage = st.session_state.get("diag_stage")
 
-    # Stage: run connectivity check
+    # Stage: run connectivity check (with retry)
     if stage == "check":
+        import time as _time
+        _MAX_ATTEMPTS = 4
+        _RETRY_WAIT = 10
+
         remote_url = st.session_state.get("remote_mcp_url")
         if remote_url:
-            with st.spinner("Checking remote database..."):
+            attempt = st.session_state.get("diag_check_attempt", 1)
+            with st.spinner(f"Checking remote database (attempt {attempt}/{_MAX_ATTEMPTS})..."):
                 ok, count, err = _check_remote(remote_url)
             if ok and count > 0:
+                st.session_state.pop("diag_check_attempt", None)
                 st.session_state["diag_force_local"] = False
                 st.session_state["diag_stage"] = "running"
                 st.rerun()
+            elif attempt < _MAX_ATTEMPTS:
+                st.info(f"Attempt {attempt}/{_MAX_ATTEMPTS} failed — retrying in {_RETRY_WAIT}s...")
+                st.session_state["diag_check_attempt"] = attempt + 1
+                _time.sleep(_RETRY_WAIT)
+                st.rerun()
             else:
-                msg = err if err else f"Remote returned 0 papers."
-                st.session_state["diag_check_error"] = msg
+                st.session_state.pop("diag_check_attempt", None)
+                msg = err if err else "Remote returned 0 papers."
+                st.session_state["diag_check_error"] = f"Failed after {_MAX_ATTEMPTS} attempts: {msg}"
                 st.session_state["diag_stage"] = "confirm_local"
                 st.rerun()
         else:

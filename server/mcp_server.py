@@ -23,9 +23,6 @@ from fastmcp import FastMCP
 from src.peerlens.agent.tools import (
     search_papers,
     get_paper_reviews,
-    cluster_reviews,
-    analyze_temporal_distribution,
-    identify_research_gaps,
 )
 
 mcp = FastMCP("PeerLens")
@@ -58,42 +55,6 @@ def _get_paper_reviews(paper_ids: list[str]) -> dict:
     result = get_paper_reviews.invoke({"paper_ids": paper_ids})
     return result.model_dump()
 
-
-@mcp.tool(name="cluster_reviews")
-def _cluster_reviews(primary_area: str, n_clusters: int = 5) -> dict:
-    """Cluster review comments for a research area to identify criticism patterns."""
-    result = cluster_reviews.invoke(
-        {"primary_area": primary_area, "n_clusters": n_clusters}
-    )
-    return result.model_dump()
-
-
-@mcp.tool(name="analyze_temporal_distribution")
-def _analyze_temporal_distribution(
-    topic: str,
-    conferences: list[str] | None = None,
-    years: list[int] | None = None,
-) -> dict:
-    """Analyze how a research topic's presence evolves over years and conferences."""
-    result = analyze_temporal_distribution.invoke(
-        {
-            "topic": topic,
-            "conferences": conferences or ["NeurIPS", "ICML", "ICLR"],
-            "years": years or [2022, 2023, 2024, 2025],
-        }
-    )
-    return result.model_dump()
-
-
-@mcp.tool(name="identify_research_gaps")
-def _identify_research_gaps(
-    domain: str, min_cluster_density: float = 0.1
-) -> dict:
-    """Identify under-explored research areas in a domain."""
-    result = identify_research_gaps.invoke(
-        {"domain": domain, "min_cluster_density": min_cluster_density}
-    )
-    return result.model_dump()
 
 
 if __name__ == "__main__":

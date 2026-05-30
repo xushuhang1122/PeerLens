@@ -8,9 +8,6 @@ from ..config import settings
 _REMOTE_TOOL_NAMES = {
     "search_papers",
     "get_paper_reviews",
-    "cluster_reviews",
-    "analyze_temporal_distribution",
-    "identify_research_gaps",
 }
 
 # Cache keyed by URL so switching servers doesn't serve stale tools.
